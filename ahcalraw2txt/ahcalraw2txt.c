@@ -22,19 +22,27 @@ static struct argp_option options[] =
             { "triggered_reject", 'k', 0, 0, "print only hits, that were NOT validated externally (via bif/ahcal)" },
             { "asic", 'a', "ASIC_NUMBER", 0, "asic number (must be < 256)" },
             { "channel", 'c', "CHANNEL_NUMBER", 0, "channel number to be correlated" },
-            { "memcell", 'm', "MEMCELL_NUMBER", 0, "memory cell to only take into account (0..15)" },
-            { "from_memcell", 259, "MEMCELL_NUMBER", 0, "from which memory cell (including) should be the data processed (0..15)" },
+            { "memcell", 'm', "CELL_NUM", 0, "memory cell to only take into account (0..15)" },
+            { "from_memcell", 259, "CELL_NUM", 0, "from which memory cell (including) should be the data processed (0..15)" },
             { "to_memcell", 260, "MEMCELL_NUMBER", 0, "to which memory cell (including) should be the data processed (0..15)" },
             { "start_position", 't', "START_POSITION", 0,"Start position in the BIF data (corresponds to the event counter of the first start acq channel). When no number is given, first data entry is considered as a first readout cycle" },
             { "correlation_shift", 'r', "RELATIVE_TIMESTAMP", 0, "Correlation timestamp, which synchronizes BXIDs between BIF and SPIROC. Default:13448" },
-            { "minimum_bxid", 'j', "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
+            { "from_bxid", 261, "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
+            { "to_bxid", 262, "MAX_BXID", 0, "BXIDs greater than MAX_BXID will be ignored. Default:4095" },
             { "bxid_length", 'l', "LENGTH", 0, "length of the BXID in BIF tics (to convert from ns: multiply by 1.28)" },
             { "require_hitbit", 'h', 0, 0, "Filter only the hitbit==1 data" },
             { "reject_hitbit", 'e', 0, 0, "Filter only the hitbit==0 data" },
             { "require_gainbit", 257, 0, 0, "Filter only the gainbit==1 data (high gain)" },
             { "reject_gainbit", 258, 0, 0, "Filter only the gainbit==0 data (low gain)" },
+            { "even_bxid_only", 263, 0, 0, "Filter only even bxids(0,2,4,...)" },
+            { "odd_bxid_only", 264, 0, 0, "Filter only odd bxids (1,3,...)" },
+            { "reject_gainbit", 258, 0, 0, "Filter only the gainbit==0 data (low gain)" },
+            { "dif_id", 267, "NUM", 0, "use only specified DIF-ID number" },
+            { "lda_port", 268, "NUM", 0, "use only LDA port" },
             { "histogram", 'i', 0, 0, "Print histogram instead of events" },
             { "rebin", 'n', "BINNING", 0, "histogram will be rebinned" },
+            { "from_trigger_time", 265, "TDC_BIN", 0, "minimal external external trigger time (mind the bxid length" },
+            { "to_trigger_time", 266, "TDC_BIN", 0, "maximal external trigger time (mind the bxid length" },           
             { "run_number", 'u', "RUN_NUMBER", 0, "Run number used for the prints" },
             { "empty_bxid_only", 'y',0, 0, "uses only BXID, which doesn't have any hitbit. require_hitbit is not allowed" },
             { 0 } };
@@ -50,7 +58,8 @@ struct arguments_t {
    int to_memcell;
    int start_position;
    int correlation_shift;
-   int minimum_bxid;
+   int from_bxid;
+   int to_bxid;
    int bxid_length;
    int hitbit_only;
    int hitbit_reject;
@@ -62,6 +71,12 @@ struct arguments_t {
    int histogram;
    int binning;
    int empty_bxid;
+   int even_bxid_only;
+   int odd_bxid_only;
+   int from_trigger_time;
+   int to_trigger_time;
+   int dif_id;
+   int lda_port;
 };
 struct arguments_t arguments;
 
@@ -78,7 +93,8 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->correlation_shift = 2121;
    arguments->hitbit_only = 0;
    arguments->hitbit_reject = 0;
-   arguments->minimum_bxid = 1;/*by default ship BXID 0*/
+   arguments->from_bxid = 1;/*by default ship BXID 0*/
+   arguments->to_bxid = 4095;
    arguments->bxid_length = 160;
    arguments->run_number = -1;
    arguments->triggered_only = 0;
@@ -88,6 +104,12 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->empty_bxid = 0;
    arguments->reject_gainbit = 0;
    arguments->require_gainbit = 0;
+   arguments->even_bxid_only = 0;
+   arguments->odd_bxid_only = 0;
+   arguments->from_trigger_time = 0;
+   arguments->to_trigger_time= 1000000;
+   arguments->dif_id = -1;
+   arguments->lda_port = -1;
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -105,14 +127,21 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#require_hitbit=%d\n", arguments->hitbit_only);
    printf("#reject_hitbit=%d\n", arguments->hitbit_reject);
    printf("#bxid_length=%d\n", arguments->bxid_length);
-   printf("#minimum_bxid=%d\n", arguments->minimum_bxid);
+   printf("#from_bxid=%d\n", arguments->from_bxid);
+   printf("#to_bxid=%d\n", arguments->to_bxid);
    printf("#triggered_only=%d\n", arguments->triggered_only);
    printf("#triggered_reject=%d\n", arguments->triggered_reject);
    printf("#histogram=%d\n", arguments->histogram);
    printf("#binning=%d\n",arguments->binning);
    printf("#empty_bxid_only=%d\n",arguments->empty_bxid);
+   printf("#even_bxid_only=%d\n",arguments->even_bxid_only);
+   printf("#odd_bxid_only=%d\n",arguments->odd_bxid_only);
    printf("#reject_gainbit=%d\n",arguments->reject_gainbit);
    printf("#require_gainbit=%d\n",arguments->require_gainbit);
+   printf("#from_trigger_time=%d\n", arguments->from_trigger_time);
+   printf("#to_trigger_time=%d\n", arguments->to_trigger_time);
+   printf("#dif_id=%d\n",arguments->dif_id);
+   printf("#lda_port=%d\n",arguments->lda_port);
    printf("# --- END PROGRAM PARAMETERS ---\n");
 }
 
@@ -144,8 +173,17 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       case 'i':
          arguments->histogram = 1;
          break;
-      case 'j':
-         arguments->minimum_bxid = atoi(arg);
+      case 261:
+         arguments->from_bxid = atoi(arg);
+         break;
+      case 262:
+         arguments->to_bxid = atoi(arg);
+         break;
+      case 263:
+         arguments->even_bxid_only = 1;
+         break;
+      case 264:
+         arguments->odd_bxid_only = 1;
          break;
       case 'k':
          arguments->triggered_reject = 1;
@@ -185,6 +223,18 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
          break;
       case 258:
          arguments->reject_gainbit = 1;
+         break;
+      case 265:
+         arguments->from_trigger_time = atoi(arg);
+         break;
+      case 266:
+         arguments->to_trigger_time = atoi(arg);
+         break;
+      case 267:
+         arguments->dif_id = atoi(arg);
+         break;
+      case 268:
+         arguments->lda_port = atoi(arg);
          break;
       case ARGP_KEY_END:
          if ((arguments->spiroc_raw_filename == NULL)) {
@@ -273,9 +323,9 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
 
    int ROC = 0;
    u_int64_t TS = 0;
-   u_int64_t lastTS = 0;
+   /* u_int64_t lastTS = 0; */
    u_int64_t lastStartTS = 0;
-   u_int64_t lastStopTS = 0;
+   /* u_int64_t lastStopTS = 0; */
 
    int within_ROC = 0;
    unsigned char minibuf[8];
@@ -332,7 +382,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          }
          if (type == 0x02) {
             within_ROC = 0;
-            lastStopTS = TS;
+            /* lastStopTS = TS; */
          }
          if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
          //         fseek(fp, 8, SEEK_CUR);
@@ -351,7 +401,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          bif_data[bif_data_index].tdc = (TS - lastStartTS); // << 5;
          bif_data[bif_data_index++].trig_count = trigid;
       }
-      lastTS = TS;
+      /* lastTS = TS; */
    }
    file_finished2:
    *bif_last_record = bif_data_index;
@@ -389,7 +439,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    u_int8_t trig_details[4];
    u_int64_t shutter_cnt = 0;
    u_int64_t first_shutter = 0;
-   u_int64_t last_accepted_trigger_TS = 0LLU;
+   /* u_int64_t last_accepted_trigger_TS = 0LLU; */
    unsigned char minibuf[8];
    while (1) {
       if (fread(minibuf, sizeof(minibuf), 1, fp) <= 0) /*read first 8 bytes*/
@@ -410,7 +460,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
             trig_details[0] = minibuf[4]; /*we use only 1 trigger input at the moment*/
             /*the fine timestamp needs to be converted to the direct timestamp by subtracting 8 (= adding 24)*/
             finetime_trig = (time << 5) | ((trig_details[0] + 0x18) & 0x1F);
-            last_accepted_trigger_TS = finetime_trig;
+            /* last_accepted_trigger_TS = finetime_trig; */
             if ((shutter_cnt >= arguments->start_position) && (bif_data_index < C_MAX_BIF_EVENTS)) {/*if the data index is in range*/
                bif_data[bif_data_index].ro_cycle = shutter_cnt; // - first_shutter;
                bif_data[bif_data_index].tdc = finetime_trig - (oldtime_fcmd << 5);
@@ -454,59 +504,59 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    return 0;
 }
 
-int get_first_iterator(const struct arguments_t * arguments, const BIF_record_t *bif_data, int ROcycle, int bxid) {
-   /*perform a quick search in the iterator array*/
-//	bif_roc = bif_data[bif_iterator].ro_cycle - arguments->start_position;
-//	bif_bxid = (bif_data[bif_iterator].tdc - arguments->correlation_shift) / 5120;
-//	bif_tdc = (bif_data[bif_iterator].tdc - arguments->correlation_shift) % 5120;
-   int wanted_bif_roc = ROcycle + arguments->start_position;
-   u_int64_t wanted_bif_tdc = bxid * arguments->bxid_length + arguments->correlation_shift;
-   u_int64_t wanted_bif_tdc_following = wanted_bif_tdc + arguments->bxid_length;
-//	printf("Inputs: req.ROC:%d\treq.BXID:%d\t", ROcycle, bxid);
-//	printf("WBROC:%llu\tWBTDC:%llu\tWBTDC_F:%llu\n", wanted_bif_roc, wanted_bif_tdc, wanted_bif_tdc_following);
-   int start = 0;
-   int end = bif_last_record;/**/
-   int guess = 0;
-   int hit = -1;
-   if (arguments->correlation_shift + bxid * arguments->bxid_length < 0) return -1;
-//	printf("\n");
-   while (start <= end) {
-      int half = (end - start) >> 1;
+/* int get_first_iterator(const struct arguments_t * arguments, const BIF_record_t *bif_data, int ROcycle, int bxid) { */
+/*    /\*perform a quick search in the iterator array*\/ */
+/* //	bif_roc = bif_data[bif_iterator].ro_cycle - arguments->start_position; */
+/* //	bif_bxid = (bif_data[bif_iterator].tdc - arguments->correlation_shift) / 5120; */
+/* //	bif_tdc = (bif_data[bif_iterator].tdc - arguments->correlation_shift) % 5120; */
+/*    int wanted_bif_roc = ROcycle + arguments->start_position; */
+/*    u_int64_t wanted_bif_tdc = bxid * arguments->bxid_length + arguments->correlation_shift; */
+/*    u_int64_t wanted_bif_tdc_following = wanted_bif_tdc + arguments->bxid_length; */
+/* //	printf("Inputs: req.ROC:%d\treq.BXID:%d\t", ROcycle, bxid); */
+/* //	printf("WBROC:%llu\tWBTDC:%llu\tWBTDC_F:%llu\n", wanted_bif_roc, wanted_bif_tdc, wanted_bif_tdc_following); */
+/*    int start = 0; */
+/*    int end = bif_last_record;/\**\/ */
+/*    int guess = 0; */
+/*    int hit = -1; */
+/*    if (arguments->correlation_shift + bxid * arguments->bxid_length < 0) return -1; */
+/* //	printf("\n"); */
+/*    while (start <= end) { */
+/*       int half = (end - start) >> 1; */
 
-      guess = start + half;
-//		printf("%d\t%d\t%d\t%d\t%d\n", start, end, guess, bif_data[guess].ro_cycle, bif_data[guess].trig_count);
-      if (bif_data[guess].ro_cycle == -1) {/*we are out of the stored data*/
-         end = guess - 1;
-         continue;
-      }
-      if (bif_data[guess].ro_cycle < wanted_bif_roc) {/*ROC smaller than wanted*/
-         start = guess + 1;/*sart from the next*/
-      } else {/*same or later readout cycle*/
-         if (bif_data[guess].ro_cycle > wanted_bif_roc) {
-            end = guess - 1;/*higher readout cycle*/
-         } else {
-            /*********************/
-            /* same readout cycle*/
-            /*********************/
-            /* needs further comparisons*/
-            if (bif_data[guess].tdc < wanted_bif_tdc) {
-               /*previous bxid. not ineterested*/
-               start = guess + 1;
-            } else {
-               if (bif_data[guess].tdc >= wanted_bif_tdc_following) {
-                  /*next bxid. not interrested*/
-                  end = guess - 1;
-               } else {
-                  /*same BXID. still can be more events in the same bxid. we need the first*/
-                  hit = guess;/*it is a valid result, lets save it and continue searching better*/
-                  end = guess - 1; /*and continue searching for earlier events*/
-               }
-            }
-         }
-      }
-   }
-   return hit;
-}
+/*       guess = start + half; */
+/* //		printf("%d\t%d\t%d\t%d\t%d\n", start, end, guess, bif_data[guess].ro_cycle, bif_data[guess].trig_count); */
+/*       if (bif_data[guess].ro_cycle == -1) {/\*we are out of the stored data*\/ */
+/*          end = guess - 1; */
+/*          continue; */
+/*       } */
+/*       if (bif_data[guess].ro_cycle < wanted_bif_roc) {/\*ROC smaller than wanted*\/ */
+/*          start = guess + 1;/\*sart from the next*\/ */
+/*       } else {/\*same or later readout cycle*\/ */
+/*          if (bif_data[guess].ro_cycle > wanted_bif_roc) { */
+/*             end = guess - 1;/\*higher readout cycle*\/ */
+/*          } else { */
+/*             /\*********************\/ */
+/*             /\* same readout cycle*\/ */
+/*             /\*********************\/ */
+/*             /\* needs further comparisons*\/ */
+/*             if (bif_data[guess].tdc < wanted_bif_tdc) { */
+/*                /\*previous bxid. not ineterested*\/ */
+/*                start = guess + 1; */
+/*             } else { */
+/*                if (bif_data[guess].tdc >= wanted_bif_tdc_following) { */
+/*                   /\*next bxid. not interrested*\/ */
+/*                   end = guess - 1; */
+/*                } else { */
+/*                   /\*same BXID. still can be more events in the same bxid. we need the first*\/ */
+/*                   hit = guess;/\*it is a valid result, lets save it and continue searching better*\/ */
+/*                   end = guess - 1; /\*and continue searching for earlier events*\/ */
+/*                } */
+/*             } */
+/*          } */
+/*       } */
+/*    } */
+/*    return hit; */
+/* } */
 
 int get_first_iterator2(const struct arguments_t * arguments, const BIF_record_t *bif_data, int ROcycle) {
    /*perform a quick search in the iterator array and return the bif trigger before the readout cycle*/
@@ -595,6 +645,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
    memset(hist_ch_adc, 0, sizeof hist_ch_adc);
    memset(hist_ch_tdc, 0, sizeof hist_ch_tdc);
    /*spiroc datafile iteration*/
+   int lda_port = 0;
+   int dif_id = 0;
    int bxid = 0;
    int asic = 0;
    int memcell = 0;
@@ -605,12 +657,16 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
    int tdc_hit = 0;
    int tdc_gain = 0;
    int mismatches_hit = 0;
+   int mismatches_hit_adc0_tdc1 = 0;
    int mismatches_gain = 0;
+   int mismatches_gain_adc0_tdc1 = 0;
    int mismatches_length = 0;
+   int bxids_even = 0;//counts even bxids: 0,2,4,...
+   int bxids_odd = 0;//counts odd bxids: 1,3,5,...
    u_int32_t ROCLength = 0;
    /*BIF iteration variables*/
    u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
-   u_int32_t bif_roc = 0;
+   //u_int32_t bif_roc = 0;
    int bif_bxid = 0;
 //   u_int64_t bif_tdc = 0;
    u_int32_t entries = 0;//printed entries
@@ -649,6 +705,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          //fprintf(stdout, "#TS packet\n");
          continue;
       }
+      lda_port = (headinfo & 0xFF00)>>8;
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 2);
 //		printf("%05d\t", row_index);
 //		printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
@@ -661,6 +718,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
 //			printf("no spiroc data packet!\n");
          continue;
       }
+      if ((arguments->lda_port != -1 ) && (lda_port != arguments->lda_port) ) continue;
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
@@ -668,6 +726,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
       }
       if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
+      dif_id = buf[6] | (buf[7]<<8);//16-bit DIF ID
+      if ((arguments->dif_id != -1) && (dif_id != arguments->dif_id)) continue; /* skip data from unwanted dif ID */
       int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
 //		printf("#memory cells: %d\n", memcell_filled);
       ROCLength = get_ROCLength(arguments, bif_data, ROcycle);
@@ -676,6 +736,15 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted memory cell*/
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         if ( (bxid < arguments->from_bxid) || (bxid > arguments->to_bxid) ) continue;
+         if (bxid & 0x01) {
+            bxids_odd++ ;
+            if (arguments->even_bxid_only) continue;
+         } else {
+            bxids_even++;
+            if (arguments->odd_bxid_only) continue;
+         }
+         
          int emptybxid=1;//assume at the beginning, that there is no hit
          for (channel = 0; channel < 36; ++channel) {
             //if there is a hit, then set emptybxid=0
@@ -695,9 +764,13 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
             tdc_gain = (tdc & 0x2000) ? 1 : 0;\
             tdc = tdc & 0x0fff;
             adc = adc & 0x0fff;
-            if (adc_hit != tdc_hit) mismatches_hit++;
+            if (adc_hit != tdc_hit) {
+               mismatches_hit++;
+               if (adc_hit==0)mismatches_hit_adc0_tdc1++;
+            }
             if (adc_gain != tdc_gain){
                mismatches_gain++;
+               if (adc_gain == 0) mismatches_gain_adc0_tdc1++;
                /* printf("Gain mismatch: ROC=%d, A=%d, Ch=%d, mem=%d, ADC=%d, Gain_ADC=%d, Gain_TDC=%d\n", */
                /*        ROcycle, asic, channel, memcell, adc,adc_gain, tdc_gain); */
             }
@@ -721,6 +794,17 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
             int matchingTriggerIterator = isTriggered(arguments, ROcycle, bxid, first_bif_iterator);
             if ((matchingTriggerIterator >= 0) && arguments->triggered_reject) continue;
             if ((matchingTriggerIterator < 0) && arguments->triggered_only) continue;
+            u_int64_t bif_tdc = 0;
+            if (matchingTriggerIterator >= 0) {
+               bif_iterator = matchingTriggerIterator;
+               //bif_roc = bif_data[bif_iterator].ro_cycle - arguments->start_position;
+               bif_bxid = ((int) bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
+               bif_tdc = (bif_data[bif_iterator].tdc - arguments->correlation_shift) % arguments->bxid_length;
+               if (bif_tdc < arguments->from_trigger_time) continue;
+               if (bif_tdc > arguments->to_trigger_time) continue;
+               matches++;
+            }
+            
             if (arguments->histogram) {
                int adc_index = (adc & 0xfff) +  (adc_gain?0:4096);//low gain shifted to >4096
                if (adc_index > 8191) {//should not happen, but better be sure
@@ -728,19 +812,15 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
                }
                hist_adc[(adc_index/arguments->binning)*arguments->binning]++; 
                hist_ch_adc[channel][(adc_index/arguments->binning)*arguments->binning]++;
-               hist_tdc[((tdc & 0xfff)/arguments->binning)*arguments->binning]++;
-               hist_ch_tdc[channel][((tdc & 0xfff)/arguments->binning)*arguments->binning]++;
+               //shift odd bxid to >4096
+               hist_tdc[(( (tdc & 0xfff) | ((bxid & 0x01)<<12) )/arguments->binning)*arguments->binning]++;
+               hist_ch_tdc[channel][(( (tdc & 0xfff) | ((bxid & 0x01)<<12) )/arguments->binning)*arguments->binning]++;
                entries++;
                if (matchingTriggerIterator >= 0) matches++;
                continue;//don't print details and go to next channel
             }
             entries++;
             if (matchingTriggerIterator >= 0) {
-               bif_iterator = matchingTriggerIterator;
-               bif_roc = bif_data[bif_iterator].ro_cycle - arguments->start_position;
-               bif_bxid = ((int) bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
-               u_int64_t bif_tdc = (bif_data[bif_iterator].tdc - arguments->correlation_shift) % arguments->bxid_length;
-               matches++;
                /************************************************/
                /* here we have correlated candidate in memory  */
                /************************************************/
@@ -773,7 +853,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
                printf("%d\t", adc_gain);
                printf("NaN\t");
                printf("NaN\t");
-               printf("%d\t", ROCLength);
+               printf("NaN\t");
                printf("%d\t", memcell_filled);
                if (adc_hit != tdc_hit) printf("\t#mismatched_tdc_hit");
                if (adc_gain != tdc_gain) printf("\t#mismatched_tdc_gain");
@@ -795,9 +875,14 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          printf("\n");
       }
    }
-   printf("#Mismatched hit bits: %d\n", mismatches_hit);
-   printf("#Mismatched gain bits: %d\n", mismatches_gain);
+   printf("#Mismatched hit bits: %d (%f%% of all)\n", mismatches_hit,100.0*mismatches_hit/entries);
+   printf("#Mismatched hit bits type adc0_tdc1: %d (%f%% of mismatched)\n", mismatches_hit_adc0_tdc1,(100.0)*mismatches_hit_adc0_tdc1/mismatches_hit);
+   printf("#Mismatched gain bits: %d (%f%% of all)\n", mismatches_gain,100.0*mismatches_gain/entries);
+   printf("#Mismatched gain bits type adc0_tdc1: %d, (%f%% of mismatched)\n", mismatches_gain_adc0_tdc1,100.0*mismatches_gain_adc0_tdc1/mismatches_gain);
    printf("#Mismatched packet lengths: %d\n",mismatches_length);
+   printf("#odd bxids: %d\n",bxids_odd);
+   printf("#even bxids: %d\n",bxids_even);
+   printf("#bxid balance (odd vs all): %f\n",100.0*bxids_odd/(bxids_odd+bxids_even));
    printf("#Matched %d\n",matches);
    printf("#Entries %d\n",entries);
    return 0;

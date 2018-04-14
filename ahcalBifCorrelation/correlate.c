@@ -33,7 +33,8 @@ static struct argp_option options[] =
             { "shift_scan_method", 'e', "METHOD_NUMBER", 0,
                   "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice)\n2=channel-wise: only specified channel is used. Default:0" },
             { "bif_trigger_spacing", 'g', 0, 0, "print the time distance between particles as BXID and timestamp differences. Correct offset should be given" },
-            { "minimum_bxid", 'j', "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
+            { "minimum_bxid", 257, "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
+            { "maximum_bxid", 258, "MAX_BXID", 0, "BXIDs greater than MAX_BXID will be ignored. Default:4095" },
             { "bxid_spacing", 'i', "MODE", 0,
                   "print the bxid distance in AHCAL data.. Mode:\n1=print all distances\n2=print distances of correlated BXID\n3=print only uncorrelated distances (from last correlated bxid)" },
             { "bxid_length", 'l', "LENGTH", 0, "length of the BXID in BIF tics (to convert from ns: multiply by 1.28)" },
@@ -66,6 +67,7 @@ struct arguments_t {
    int shift_scan_method;
    int bif_trigger_spacing;
    int minimum_bxid;
+   int maximum_bxid;
    int bxid_spacing;
    int bxid_length;
    int require_hitbit;
@@ -97,6 +99,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->shift_scan_method = 0;
    arguments->require_hitbit = 0;
    arguments->minimum_bxid = 1;/*by default ship BXID 0*/
+   arguments->maximum_bxid = 4095;
    arguments->bif_trigger_spacing = -1;
    arguments->bxid_length = 5120;
    arguments->bxid_spacing = -1;
@@ -130,6 +133,7 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#BXID_spacing=%d\n", arguments->bxid_spacing);
    printf("#BXID_length=%d\n", arguments->bxid_length);
    printf("#Minimum BXID=%d\n", arguments->minimum_bxid);
+   printf("#Maximum BXID=%d\n", arguments->maximum_bxid);
    printf("#trig_data_from_spiroc_raw=%d\n", arguments->trig_data_from_spiroc_raw);
    printf("#aftertrigger_veto=%d\n", arguments->aftertrigger_veto);
    printf("#report_gaps_ms=%d\n", arguments->aftertrigger_veto);
@@ -173,8 +177,11 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       case 'i':
          arguments->bxid_spacing = atoi(arg);
          break;
-      case 'j':
+      case 257:
          arguments->minimum_bxid = atoi(arg);
+         break;
+      case 258:
+         arguments->maximum_bxid = atoi(arg);
          break;
       case 'k':
          arguments->debug_constant = atoi(arg);
@@ -386,7 +393,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       if (type != 0x10) {
          if (type == 0x01) {      //start acq
             within_ROC = 1;
-            ROC = update_counter_modulo(ROC, newROC, 256, 1);
+            ROC = update_counter_modulo(ROC, newROC, 256, 100);
             if ((TS - lastStartTS) > (40000LLU * arguments->report_gaps_ms)) {
                fprintf(stdout, "#Long gap before start: roc=%d,\ttime_s=%f\n", ROC, (25.0E-9) * (TS - lastStartTS));
             }
@@ -398,7 +405,6 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
             if (arguments->realign_bif_starts > -100) {
                //time = ((time + arguments->realign_bif_starts) & (0xFFFFFFFFFFFFFFF8LLU));// - arguments->realign_bif_starts ;
                //TODO following procedure does not seem to work correctly. needs further investigation
-
                u_int64_t c1 = (u_int64_t) 6LLU;	       //(arguments->debug_constant&0x7);//for faster edits
                u_int64_t c2 = (u_int64_t) 1LLU;	       //((arguments->debug_constant >> 3)& 0x07);//for faster edits
                u_int64_t correction1 = (TS + ((c1 - arguments->realign_bif_starts) & 0x07LLU)) & 0xffffFFFFffffFFF8LLU;	//to align all start acquisition phases to the singled one, which was set by the sync CCC command during the start of the run
@@ -406,10 +412,15 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
                TS = correction1 + correction2;
             }
             lastStartTS = TS;
+            fprintf(stdout,"Debug start\troc=%d\tNROC=%d\tTS=%llu\n",ROC,newROC,(long long unsigned int) TS);
+            /* fprintf(stdout,"#Debug start\tROC=%d\n",ROC); */
+            /* fprintf(stdout,"#Debug start\tNROC=%d\n",newROC); */
+            /* fprintf(stdout,"#Debug start\tTS=%llu\n",(long long unsigned int) TS); */
          }
          if (type == 0x02) {
             within_ROC = 0;
             lastStopTS = TS;
+            fprintf(stdout,"Debug stop\troc=%d\tNROC=%d\tTS=%llu\n",ROC,newROC,(long long unsigned int) TS); 
             if ((ROC >= 0) && (ROC < C_ROC_READ_LIMIT)) extra_stats[(ROC)].acq_length = lastStopTS - lastStartTS;
          }
          if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
@@ -433,7 +444,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          bif_data[bif_data_index].tdc = (TS - lastStartTS); // << 5;
          bif_data[bif_data_index++].trig_count = trigid;
       }
-      if ((within_ROC == 1) && (arguments->print_triggers)) {
+      if ( (arguments->print_triggers)) {
          fprintf(stdout, "#%05d\t", ROC);
          fprintf(stdout, "%05d\t", trigid);
          fprintf(stdout, "%llu\t", (long long unsigned int) TS);
@@ -445,7 +456,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
                (long long int) (((long long int) TS - (long long int) lastStartTS) - arguments->correlation_shift) / arguments->bxid_length);
          fprintf(stdout, "%lli\t",
                (long long int) (((long long int) TS - (long long int) lastStartTS) - arguments->correlation_shift) % arguments->bxid_length);
-         fprintf(stdout, "#Trig\n");
+         fprintf(stdout, "#Trig \n");
       }
       lastTS = TS;
 
@@ -489,6 +500,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    int first_shutter_processed = 0;
    u_int64_t last_accepted_trigger_TS = 0LLU;
    unsigned char minibuf[8];
+   int within_ROC=0;
    while (1) {
       if (fread(minibuf, sizeof(minibuf), 1, fp) <= 0) /*read first 8 bytes*/
       goto file_finished;
@@ -515,12 +527,29 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
                bif_data[bif_data_index].tdc = finetime_trig - (oldtime_fcmd << 5);
                bif_data[bif_data_index++].trig_count = trig_counter;
             }
+            if ( (arguments->print_triggers)) {
+               fprintf(stdout, "#%05llu\t", (long long unsigned int) shutter_cnt - arguments->start_position);
+               fprintf(stdout, "%05d\t", trig_counter);
+               fprintf(stdout, "%llu\t", (long long unsigned int) finetime_trig);
+               fprintf(stdout, "%d\t", within_ROC);
+               /* fprintf(stdout, "%d\t", increment); */
+               /* fprintf(stdout, "%lli\t", (long long int) TS - (long long int) lastStartTS); */
+               /* fprintf(stdout, "%lli\t", (long long int) TS - (long long int) lastTS); */
+               /* fprintf(stdout, "%lli\t", (long long int) (((long long int) TS - (long long int) lastStartTS) - arguments->correlation_shift) / arguments->bxid_length); */
+               /* fprintf(stdout, "%lli\t", */
+               /*         (long long int) (((long long int) TS - (long long int) lastStartTS) - arguments->correlation_shift) % arguments->bxid_length); */
+               /* fprintf(stdout, "#Trig\n"); */
+               fprintf(stdout,"\n");
+            }
+
             break;
          case 2:
+            within_ROC = 0;
             //stop acquisition
             oldtime_fcmd = time;
             break;
          case 3:
+            within_ROC = 1;
             //"details" variable is treated as shutter_counter (12 bit)
             if ((details_last == 4095) && (details == 0)) {
                /*when the shutter counter overflows, we have to increment the shutter counter properlyew*/
@@ -890,6 +919,8 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
          if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted asic*/
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         if (bxid < arguments->minimum_bxid) continue;
+         if (bxid > arguments->maximum_bxid) continue;
          for (channel = 0; channel < 36; ++channel) {
             if ((arguments->channel != -1) && (channel != arguments->channel)) continue;/*ship data from unwanted channel*/
 
@@ -1292,7 +1323,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
       }
 //      printf("#DEBUG ROC: %d\n",ROcycle);
 
-      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 1);
+      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
 
       if (ROcycle != roc_prev) {
          if (roc_prev >= 0) {
@@ -1316,15 +1347,18 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
                         first_bif_iterator = bif_iterator;
                         continue;
                      }
-                     int shift = 0;
                      int startindex = arguments->bxid_length * (bif_bxid - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
                      int endindex = startindex + arguments->bxid_length;
                      if (startindex < 0) startindex = 0;
                      if (endindex >= max_correlation) endindex = max_correlation;
 //                  printf("start: %d\tend: %d\n", startindex, endindex);
-                     for (shift = startindex; shift < endindex; shift++) {
-                        scan[shift]++;
-                     }
+                     /* int shift = 0; */
+                     /* for (shift = startindex; shift < endindex; shift++) { */
+                     /*    scan[shift]++; */
+                     /* } */
+                     /* just marking where the scan data should increase by 1 and decrease by 1 again*/
+                     if (startindex<max_correlation) scan[startindex]++;
+                     scan[endindex]--;
                   }
                }
                BXIDs[bxid] = 0;
@@ -1365,6 +1399,11 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
    }
    printf("#Final ROC: %d:\n", ROcycle);
    fclose(fp);
+   int running_sum=0;
+   for (i=0 ; i<max_correlation ; i++){//getting the number of correlations
+      running_sum += scan[i];
+      scan[i]=running_sum;
+   }
    fprintf(stdout, "#maximum ROCycle: %d", ROcycle);
    int maxval = -1;
    int maxindex = -1;
@@ -1374,7 +1413,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          maxval = scan[i];
       }
    }
-   printf("#maximum correlation at: %d\thits:%d", maxindex, maxval);
+   printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
    printf("#correlation scan\n#shift\thits\n");
    for (i = 0; i < max_correlation; i++) {
       printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
@@ -1390,29 +1429,24 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
    for (; i < max_correlation; i++) {
       scan[i] = 0;
    }
-
    FILE *fp;
    if (!(fp = fopen(arguments->spiroc_raw_filename, "r"))) {
       perror("Unable to open the spiroc raw file\n");
       return -1;
    }
-
    /*spiroc datafile iteration*/
    int bxid = 0;
    int asic = 0;
    int memcell = 0;
-
    /*BIF iteration variables*/
    u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
    int bif_roc = 0;
    int bif_bxid = 0;
-
    unsigned int headlen, headinfo;
    unsigned char b;
    int freadret; //return code
 //   int roc_prev = -1;
-   u_int32_t ROcycle = -1;
-
+   int32_t ROcycle = 0;
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
@@ -1420,7 +1454,6 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          break;
       }
       if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
-
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
          perror("#unable to read / EOF\n");
@@ -1433,13 +1466,7 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          printf("#wrong header length: %d", headlen & 0xffff);
          continue;
       }
-      /* if (((headlen >> 16) & 0xFF) != roc_prev) { */
-      /*          roc_prev = ((headlen >> 16) & 0xFF); */
-      /*          ++ROcycle; */
-      /* //       cycles[row_index] = roc_prev; */
-      /*       } */
-      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 2);
-
+      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
       /* printf("#DEBUG ROC: %d\n",ROcycle); */
       if (ROcycle >= C_ROC_READ_LIMIT) break;/*for debugging: if we do not want to read the while file. */
 //    printf("%05d\t", row_index);
@@ -1473,22 +1500,28 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
             if ((bif_bxid) > (bxid + 1 + max_correlation / arguments->bxid_length)) break; /*we jumped to another bxid with the bif_iterator*/
             if ((bif_bxid) < bxid) continue;
 
-            int shift = 0;
             int startindex = arguments->bxid_length * (bif_bxid - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
             int endindex = startindex + arguments->bxid_length;
             if (startindex < 0) startindex = 0;
             if (endindex >= max_correlation) endindex = max_correlation;
 //                  printf("start: %d\tend: %d\n", startindex, endindex);
-            for (shift = startindex; shift < endindex; shift++) {
-               scan[shift]++;
-            }
-
+            /* int shift = 0; */
+            /* for (shift = startindex; shift < endindex; shift++) { */
+            /*    scan[shift]++; */
+            /* } */
+            if (startindex<max_correlation) scan[startindex]++;
+            scan[endindex]--;
          }
       }
 
 //    printf("\n");
    }
-   fclose(fp);
+   fclose(fp);   
+   int running_sum=0;
+    for (i=0 ; i<max_correlation ; i++){//getting the number of correlations
+      running_sum += scan[i];
+      scan[i]=running_sum;
+   }
    int maxval = -1;
    int maxindex = -1;
    for (i = 0; i < max_correlation; i++) {
@@ -1497,7 +1530,7 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          maxval = scan[i];
       }
    }
-   printf("#maximum correlation at: %d\thits:%d", maxindex, maxval);
+   printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
    printf("#correlation scan\n#shift\thits\tnormalized\n");
    for (i = 0; i < max_correlation; i++) {
       printf("%d\t%d\t%f\n", i, scan[i], scan[i] / (1.0 * maxval));
