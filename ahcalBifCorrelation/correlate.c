@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <argp.h> /*parsing arguments*/
-const int C_ROC_READ_LIMIT = 100000;/*for debugging - reading only few RO cycles*/
+const int C_ROC_READ_LIMIT = 1000000;/*for debugging - reading only few RO cycles*/
 const int C_MAX_BIF_EVENTS = 5000000;
 #define C_MAX_PORTS 48
 //const int C_MAX_ROCYCLES = 1000;
@@ -412,7 +412,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
                TS = correction1 + correction2;
             }
             lastStartTS = TS;
-            fprintf(stdout,"Debug start\troc=%d\tNROC=%d\tTS=%llu\n",ROC,newROC,(long long unsigned int) TS);
+            /* fprintf(stdout,"Debug start\troc=%d\tNROC=%d\tTS=%llu\n",ROC,newROC,(long long unsigned int) TS); */
             /* fprintf(stdout,"#Debug start\tROC=%d\n",ROC); */
             /* fprintf(stdout,"#Debug start\tNROC=%d\n",newROC); */
             /* fprintf(stdout,"#Debug start\tTS=%llu\n",(long long unsigned int) TS); */
@@ -420,7 +420,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          if (type == 0x02) {
             within_ROC = 0;
             lastStopTS = TS;
-            fprintf(stdout,"Debug stop\troc=%d\tNROC=%d\tTS=%llu\n",ROC,newROC,(long long unsigned int) TS); 
+            /* fprintf(stdout,"Debug stop\troc=%d\tNROC=%d\tTS=%llu\n",ROC,newROC,(long long unsigned int) TS);  */
             if ((ROC >= 0) && (ROC < C_ROC_READ_LIMIT)) extra_stats[(ROC)].acq_length = lastStopTS - lastStartTS;
          }
          if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
