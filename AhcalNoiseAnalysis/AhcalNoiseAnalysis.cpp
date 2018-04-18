@@ -21,13 +21,14 @@ const struct option long_opts[] = {
       { "bxid_length", required_argument, nullptr, 'l' },
       { "run_number", required_argument, nullptr, 'u' },
       { "max_rocs", required_argument, nullptr, 'm' },
+      { "adc_cut", required_argument, nullptr, 'c' },
       { "help", no_argument, nullptr, 'h' },
       { nullptr, 0, nullptr, 0 }
 };
 
 struct arguments_t {
    char *spiroc_raw_filename;
-   int mipcut;
+   int adc_cut;
    bool reject_validated;
    int correlation_shift;
    int bxid_length;
@@ -39,7 +40,7 @@ struct arguments_t arguments;
 
 void argumentsInit(struct arguments_t & arguments) {
    arguments.spiroc_raw_filename = nullptr;
-   arguments.mipcut = 0;
+   arguments.adc_cut = 600;
    arguments.reject_validated = false;
    arguments.correlation_shift = 2113;
    arguments.bxid_length = 160;
@@ -49,7 +50,7 @@ void argumentsInit(struct arguments_t & arguments) {
 
 void argumentsPrint(const struct arguments_t & arguments) {
    std::cout << "#spiroc_raw_filename=" << ((arguments.spiroc_raw_filename == nullptr) ? "(no)" : arguments.spiroc_raw_filename) << std::endl;
-   std::cout << "#mipcut=" << arguments.mipcut << std::endl;
+   std::cout << "#adc_cut=" << arguments.adc_cut << std::endl;
    std::cout << "#reject_validated=" << arguments.reject_validated << std::endl;
    std::cout << "#correlation_shift=" << arguments.correlation_shift << std::endl;
    std::cout << "#bxid_length=" << arguments.bxid_length << std::endl;
@@ -66,6 +67,7 @@ void PrintHelp() {
    std::cout << "   -u, --run_number" << std::endl;
    std::cout << "   -v, --reject_validated" << std::endl;
    std::cout << "   -m, --max_roc" << std::endl;
+   std::cout << "   -c, --adc_cut" << std::endl;
    std::cout << "   -h, --help" << std::endl;
    exit(1);
 }
@@ -94,6 +96,9 @@ void ProcessArgs(int argc, char** argv) {
          case 'm':
             arguments.max_rocs = std::atoi(optarg);
             break;
+         case 'c':
+            arguments.adc_cut = std::atoi(optarg);
+            break;
          case 'h': // -h or --help
          case '?': // Unrecognized option
          default:
@@ -118,7 +123,7 @@ unsigned int getPedestal(const int lda, const int port, const int chip, const in
 }
 
 unsigned int getMipCut(const double mips, const int lda, const int port, const int chip, const int channel, const int cell) {
-   return 600; //TODO
+   return arguments.adc_cut; //TODO channel+memcell-wise pedestal estimator
 }
 
 int analyze_noise(const struct arguments_t & arguments) {
