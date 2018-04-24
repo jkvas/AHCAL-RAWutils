@@ -1,4 +1,4 @@
-TARGET = AhacalNoiseAnalysis
+TARGET = AhcalNoiseAnalysis
 CXX=g++
 RM=rm -f
 CPPFLAGS=-std=c++11 -O2 -Wall
