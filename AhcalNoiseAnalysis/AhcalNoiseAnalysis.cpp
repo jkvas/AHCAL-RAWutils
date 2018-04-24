@@ -203,7 +203,11 @@ int analyze_noise(const struct arguments_t & arguments) {
       lda = headinfo & 0xFF;
       port = (headinfo >> 8) & 0xFF;
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("#wrong header length: %d", headlen & 0xffff);
+         printf("#Too big header length: %d", headlen & 0xffff);
+         continue;
+      }
+      if (((headlen & 0xFFFF) - 12) % 146) {
+         printf("#Wrong header length: %d in port %d",(headlen & 0xFFFF),port);
          continue;
       }
       if ((headlen & 0xFFFF) == 0x10) {
