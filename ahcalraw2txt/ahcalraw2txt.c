@@ -647,6 +647,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
    /*spiroc datafile iteration*/
    int lda_port = 0;
    int dif_id = 0;
+   int ro_chain = 0;
+   int asic_index = 0;
    int bxid = 0;
    int asic = 0;
    int memcell = 0;
@@ -721,12 +723,16 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
       if ((arguments->lda_port != -1 ) && (lda_port != arguments->lda_port) ) continue;
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
+      dif_id = buf[6] | (buf[7]<<8);//16-bit DIF ID
+      ro_chain = buf[5];
+      asic_index = buf[4];
+      /* printf("#DEBUG: lda=%d, chain=%d, a_idx=%d, a=%d\n",lda_port,ro_chain,asic_index,asic); */
       if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
          mismatches_length++;
          printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
       }
       if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
-      dif_id = buf[6] | (buf[7]<<8);//16-bit DIF ID
+      
       if ((arguments->dif_id != -1) && (dif_id != arguments->dif_id)) continue; /* skip data from unwanted dif ID */
       int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
 //		printf("#memory cells: %d\n", memcell_filled);
