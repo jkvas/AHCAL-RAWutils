@@ -377,7 +377,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       if (type != 0x10) {
          if (type == 0x01) {      //start acq
             within_ROC = 1;
-            ROC = update_counter_modulo(ROC, newROC, 256, 1);
+            ROC = update_counter_modulo(ROC, newROC, 256, 100);
             lastStartTS = TS;
          }
          if (type == 0x02) {
@@ -708,7 +708,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          continue;
       }
       lda_port = (headinfo & 0xFF00)>>8;
-      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 2);
+      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
 //		printf("%05d\t", row_index);
 //		printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
       freadret = fread(buf, headlen & 0xFFF, 1, fp);
