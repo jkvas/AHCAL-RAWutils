@@ -39,12 +39,14 @@ static struct argp_option options[] =
             { "reject_gainbit", 258, 0, 0, "Filter only the gainbit==0 data (low gain)" },
             { "dif_id", 267, "NUM", 0, "use only specified DIF-ID number" },
             { "lda_port", 268, "NUM", 0, "use only LDA port" },
+            { "report_EOR", 269,"LEVEL", 0, "report of EOR packets [0=off,1=summary,2=details" },
             { "histogram", 'i', 0, 0, "Print histogram instead of events" },
             { "rebin", 'n', "BINNING", 0, "histogram will be rebinned" },
             { "from_trigger_time", 265, "TDC_BIN", 0, "minimal external external trigger time (mind the bxid length" },
             { "to_trigger_time", 266, "TDC_BIN", 0, "maximal external trigger time (mind the bxid length" },           
             { "run_number", 'u', "RUN_NUMBER", 0, "Run number used for the prints" },
             { "empty_bxid_only", 'y',0, 0, "uses only BXID, which doesn't have any hitbit. require_hitbit is not allowed" },
+            
             { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -77,6 +79,7 @@ struct arguments_t {
    int to_trigger_time;
    int dif_id;
    int lda_port;
+   int report_EOR;
 };
 struct arguments_t arguments;
 
@@ -110,6 +113,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->to_trigger_time= 1000000;
    arguments->dif_id = -1;
    arguments->lda_port = -1;
+   arguments->report_EOR = 0;
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -142,6 +146,7 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#to_trigger_time=%d\n", arguments->to_trigger_time);
    printf("#dif_id=%d\n",arguments->dif_id);
    printf("#lda_port=%d\n",arguments->lda_port);
+   printf("#report_EOR=%d\n",arguments->report_EOR);   
    printf("# --- END PROGRAM PARAMETERS ---\n");
 }
 
@@ -236,6 +241,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       case 268:
          arguments->lda_port = atoi(arg);
          break;
+      case 269:
+         arguments->report_EOR = atoi(arg);
+         break;
       case ARGP_KEY_END:
          if ((arguments->spiroc_raw_filename == NULL)) {
             argp_error(state, "missing SPIROC data filename (This is essential)!\n");
@@ -271,7 +279,6 @@ typedef struct {
 
 //SPIROC_record_t *spiroc_data = 0;
 BIF_record_t *bif_data = 0;
-
 int bif_last_record = 0;
 
 void byteswap(unsigned char minibuf[]) {
@@ -308,6 +315,7 @@ int update_counter_modulo(unsigned int oldvalue, unsigned int newvalue_modulo, u
 }
 
 int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t * bif_data, int * bif_last_record) {
+   
    printf("#start reading BIF data from AHCAL raw data\n");
    int bif_data_index = 0;
    int i;
@@ -635,6 +643,11 @@ int getPedestal(const int chip, const int channel, const int memcell, const int 
    return 0; //TODO
 }
 int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
+   
+   int port_EORs[256];
+   for (int i=0 ; i < (sizeof(port_EORs)/sizeof(port_EORs[0])); i++){
+      port_EORs[i]=0;
+   }
    FILE *fp;
    if (!(fp = fopen(arguments->spiroc_raw_filename, "r"))) {
       perror("Unable to open the spiroc raw file\n");
@@ -711,13 +724,24 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
 //		printf("%05d\t", row_index);
 //		printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
-      freadret = fread(buf, headlen & 0xFFF, 1, fp);
+      freadret = fread(buf, 1, headlen & 0xFFF, fp);
       if (!freadret) {
          printf("#unable to read the complete packet / EOF\n");
          break;
       }
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
 //			printf("no spiroc data packet!\n");
+         if (arguments->report_EOR>1) {
+            printf("%d\t%d\tinfo=0x%08x len=0x%08x, data=",ROcycle,lda_port,headinfo, headlen);
+            for (int i=0; i<freadret; i++){
+               if ((i&0x03)==0) printf(" ");
+               printf("%02x",buf[i]);
+            }
+            printf("#EOR\n");
+         }
+         if ((buf[0]==0x02) && (buf[1]==0xCC) && (buf[2]==0x0f) && (buf[4]==0x0e) && (buf[6]==0x03) ){
+            port_EORs[lda_port]++;            
+         }
          continue;
       }
       if ((arguments->lda_port != -1 ) && (lda_port != arguments->lda_port) ) continue;
@@ -891,6 +915,11 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
    printf("#bxid balance (odd vs all): %f\n",100.0*bxids_odd/(bxids_odd+bxids_even));
    printf("#Matched %d\n",matches);
    printf("#Entries %d\n",entries);
+   if (arguments->report_EOR>0){
+      for (int i=0 ; i < (sizeof(port_EORs)/sizeof(port_EORs[0])); i++){
+         printf("#port=%d; EORs=%d\n",i,port_EORs[i]);
+      }
+   }
    return 0;
 }
 
