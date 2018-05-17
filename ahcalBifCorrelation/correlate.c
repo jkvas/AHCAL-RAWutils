@@ -28,26 +28,24 @@ static struct argp_option options[] =
             { "extended_search", 'x', "BXID_TOLERANCE", 0, "extended search in +-BIXID_TOLERANCE BXIDs. Useful only for investigating BXID errors. Default 0" },
             { "start_position", 't', "START_POSITION", 0, "Start ROC offset in the BIF data. (=-1 when BIF starts from 0 and AHCAL from 1)" },
             { "correlation_shift", 'r', "RELATIVE_TIMESTAMP", 0, "Correlation timestamp, which synchronizes BXIDs between BIF and SPIROC. Default:13448" },
-            { "shift_scan_max", 'n', "SHIFT_SCAN_MAX", 0,
-                  "Do the scan for offset values between AHCAL and BIF from 0 to the given maximum. Results are calculated event-wise (every BXID is counted only once for the whole detector). Default:-1, maximum: 2000000" },
-            { "shift_scan_method", 'e', "METHOD_NUMBER", 0,
-                  "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice)\n2=channel-wise: only specified channel is used. Default:0" },
+            { "shift_scan_max", 'n', "SHIFT_SCAN_MAX", 0, "Do the scan for offset values between AHCAL and BIF from 0 to the given maximum. Results are calculated event-wise (every BXID is counted only once for the whole detector). Default:-1, maximum: 2000000" },
+            { "shift_scan_method", 'e', "METHOD_NUMBER", 0, "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice)\n2=channel-wise: only specified channel is used. Default:0" },
             { "bif_trigger_spacing", 'g', 0, 0, "print the time distance between particles as BXID and timestamp differences. Correct offset should be given" },
             { "minimum_bxid", 257, "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
             { "maximum_bxid", 258, "MAX_BXID", 0, "BXIDs greater than MAX_BXID will be ignored. Default:4095" },
-            { "bxid_spacing", 'i', "MODE", 0,
-                  "print the bxid distance in AHCAL data.. Mode:\n1=print all distances\n2=print distances of correlated BXID\n3=print only uncorrelated distances (from last correlated bxid)" },
+            { "bxid_spacing", 'i', "MODE", 0, "print the bxid distance in AHCAL data.. Mode:\n1=print all distances\n2=print distances of correlated BXID\n3=print only uncorrelated distances (from last correlated bxid)" },
             { "bxid_length", 'l', "LENGTH", 0, "length of the BXID in BIF tics (to convert from ns: multiply by 1.28)" },
             { "require_hitbit", 'h', 0, 0, "Filter only the hitbit data" },
-            { "aftertrigger_veto", 'v', "VETO_LENGTH", 0,
-                  "Period in ns after the last trigger, where another triggers are vetoed. Useful to filter glitches on trigger line" },
+            { "aftertrigger_veto", 'v', "VETO_LENGTH", 0,"Period in ns after the last trigger, where another triggers are vetoed. Useful to filter glitches on trigger line" },
             { "report_gaps_ms", 'q', "LENGTH_MS", 0, "Report readout cycles, that have larger gaps before start (to detect temperature readouts and starts)" },
-            { "realign_bif_starts", 'z', "CLOCK_PHASE", 0,
-                  "Realign the clock phase in the BIF data to desired phase (0..7). Use value <-99 to skip the realignment (or don't use this parameter at all)" },
+            { "realign_bif_starts", 'z', "CLOCK_PHASE", 0,"Realign the clock phase in the BIF data to desired phase (0..7). Use value <-99 to skip the realignment (or don't use this parameter at all)" },
             { "print_bif_start_phases", 'p', 0, 0, "simply print histogram of last 3 bits of the start acquisition commands seen by BIF" },
             { "run_number", 'u', "RUN_NUMBER", 0, "Run number used for the prints" },
             { "debug_constant", 'k', "VALUE", 0, "Debug constant for various purposes." },
             { "print_triggers", 'y', 0, 0, "prints trigger details." },
+            { "trigger_input", 259, "NUMBER",0,"use this BIF trigger number. Default:3 (close to RJ45)" },
+            { "module", 260, "NUMBER",0,"use only this module number. NOT IMPLEMENTED" },
+            { "lda_port", 261, "NUMBER",0,"use only this port number." },
             { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -79,6 +77,9 @@ struct arguments_t {
    int run_number;
    int debug_constant;
    int print_triggers;
+   int trigger_input;
+   int module;
+   int lda_port;
 };
 struct arguments_t arguments;
 
@@ -111,6 +112,9 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->run_number = -1;
    arguments->debug_constant = -1;
    arguments->print_triggers = 0;
+   arguments->trigger_input = 3;
+   arguments->module = -1;
+   arguments->lda_port = -1;
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -141,6 +145,9 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#realign_bif_starts=%d\n", arguments->realign_bif_starts);
    printf("#Debug_constant=%d\n", arguments->debug_constant);
    printf("#Print_triggers=%d\n", arguments->print_triggers);
+   printf("#trigger_input=%d\n", arguments->trigger_input);
+   printf("#module=%d\n", arguments->module);
+   printf("#lda_port=%d\n", arguments->lda_port);
 }
 
 /* Parse a single option. */
@@ -182,6 +189,15 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
          break;
       case 258:
          arguments->maximum_bxid = atoi(arg);
+         break;
+      case 259:
+         arguments->trigger_input = atoi(arg);
+         break;
+      case 260:
+         arguments->module = atoi(arg);
+         break;
+      case 261:
+         arguments->lda_port = atoi(arg);
          break;
       case 'k':
          arguments->debug_constant = atoi(arg);
@@ -517,21 +533,23 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
             goto file_finished;
 //            byteswap(minibuf);
             trig_counter = *((u_int32_t *) minibuf + 0); /*extract the trigger counter*/
-            trig_details[0] = minibuf[4]; /*we use only 1 trigger input at the moment*/
+            trig_details[3] = minibuf[4];                /* input close to RJ45 port */
+            trig_details[2] = minibuf[5]; 
+            trig_details[1] = minibuf[6]; 
+            trig_details[0] = minibuf[7]; /* input close to the clock port */
             /*the fine timestamp needs to be converted to the direct timestamp by subtracting 8 (= adding 24)*/
-            finetime_trig = (time << 5) | ((trig_details[0] + 0x18) & 0x1F);
-            if ((finetime_trig - last_accepted_trigger_TS) < ((arguments->aftertrigger_veto * 128) / 100)) continue;
-            last_accepted_trigger_TS = finetime_trig;
-            if ((shutter_cnt >= arguments->start_position) && (bif_data_index < C_MAX_BIF_EVENTS)) {/*if the data index is in range*/
-               bif_data[bif_data_index].ro_cycle = shutter_cnt; // - first_shutter;
-               bif_data[bif_data_index].tdc = finetime_trig - (oldtime_fcmd << 5);
-               bif_data[bif_data_index++].trig_count = trig_counter;
-            }
+
+            finetime_trig = (time << 5) | ((trig_details[arguments->trigger_input & 0x03] + 0x18) & 0x1F);
             if ( (arguments->print_triggers)) {
                fprintf(stdout, "#%05llu\t", (long long unsigned int) shutter_cnt - arguments->start_position);
                fprintf(stdout, "%05d\t", trig_counter);
                fprintf(stdout, "%llu\t", (long long unsigned int) finetime_trig);
                fprintf(stdout, "%d\t", within_ROC);
+               for (int i=3; i>=0; i--){
+                  if ( details & (1<<(8+i))) {fprintf(stdout,"%x",i);} else {fprintf(stdout,".");};
+               }
+               fprintf(stdout, "\t");
+               fprintf(stdout,"%02x %02x %02x %02x",trig_details[3],trig_details[2],trig_details[1],trig_details[0]);
                /* fprintf(stdout, "%d\t", increment); */
                /* fprintf(stdout, "%lli\t", (long long int) TS - (long long int) lastStartTS); */
                /* fprintf(stdout, "%lli\t", (long long int) TS - (long long int) lastTS); */
@@ -541,7 +559,15 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
                /* fprintf(stdout, "#Trig\n"); */
                fprintf(stdout,"\n");
             }
+            if ( !(details & (1<<(8+arguments->trigger_input)) )) continue;
 
+            if ((finetime_trig - last_accepted_trigger_TS) < ((arguments->aftertrigger_veto * 128) / 100)) continue;
+            last_accepted_trigger_TS = finetime_trig;
+            if ((shutter_cnt >= arguments->start_position) && (bif_data_index < C_MAX_BIF_EVENTS)) {/*if the data index is in range*/
+               bif_data[bif_data_index].ro_cycle = shutter_cnt; // - first_shutter;
+               bif_data[bif_data_index].tdc = finetime_trig - (oldtime_fcmd << 5);
+               bif_data[bif_data_index++].trig_count = trig_counter;
+            }
             break;
          case 2:
             within_ROC = 0;
@@ -881,12 +907,13 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
          //fprintf(stdout, "#TS packet\n");
          continue;
       }
+      
       int lda_port = (headinfo >> 8) & 0xFF;
       if (lda_port >= C_MAX_PORTS) {
          printf("#ERROR: wrong LDA port: %d\n", lda_port);
          continue;         //wrong port number
       }
-
+      
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 0x80);
       /* if (((headlen >> 16) & 0xFF) != roc_prev) { */
       /*    roc_prev = ((headlen >> 16) & 0xFF); */
@@ -904,6 +931,9 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
 //			printf("no spiroc data packet!\n");
          continue;
       }
+      unsigned int dif_id=((unsigned int)buf[6]) | (((unsigned int)buf[7])<<8);
+      if ((arguments->module>=0) && (arguments->module != dif_id)) continue;
+      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
@@ -941,8 +971,6 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
                break;
             int bxid_prev = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell )] | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell) + 1] << 8);
             int bxid_next = memcell==(memcell_filled-1)?-1: buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 2)] | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 2) + 1] << 8);
-
-
 
 //				if ((memcell == 0) && (channel == 0))
 //				printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", ROcycle, bxid, asic, memcell, channel, tdc, adc, hit, gain);
@@ -1064,7 +1092,10 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
          continue;
       }
       int lda_port = (headinfo >> 8) & 0xFF;
-      if (lda_port >= C_MAX_PORTS) continue;         //wrong port number
+      if (lda_port >= C_MAX_PORTS) {
+         printf("#ERROR: wrong LDA port: %d\n", lda_port);
+         continue;         //wrong port number
+      }
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 0x80);
       freadret = fread(buf, headlen & 0xFFF, 1, fp);
       if (!freadret) {
@@ -1075,6 +1106,7 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
 //       printf("no spiroc data packet!\n");
          continue;
       }
+      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
          printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
@@ -1321,10 +1353,13 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          //fprintf(stdout, "#TS packet\n");
          continue;
       }
-//      printf("#DEBUG ROC: %d\n",ROcycle);
-
+      int lda_port = (headinfo >> 8) & 0xFF;
+      if (lda_port >= C_MAX_PORTS) {
+         printf("#ERROR: wrong LDA port: %d\n", lda_port);
+         continue;         //wrong port number
+      }
+      //printf("#DEBUG ROC: %d\n",ROcycle);
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
-
       if (ROcycle != roc_prev) {
          if (roc_prev >= 0) {
             //get correlations for  what is in the BXIDs array
@@ -1384,6 +1419,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
 //       printf("no spiroc data packet!\n");
          continue;
       }
+      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
       int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
@@ -1466,6 +1502,11 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          printf("#wrong header length: %d", headlen & 0xffff);
          continue;
       }
+      int lda_port = (headinfo >> 8) & 0xFF;
+      if (lda_port >= C_MAX_PORTS) {
+         printf("#ERROR: wrong LDA port: %d\n", lda_port);
+         continue;         //wrong port number
+      }
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
       /* printf("#DEBUG ROC: %d\n",ROcycle); */
       if (ROcycle >= C_ROC_READ_LIMIT) break;/*for debugging: if we do not want to read the while file. */
@@ -1476,10 +1517,13 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          printf("#unable to read the complete packet / EOF\n");
          break;
       }
+      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
 //       printf("no spiroc data packet!\n");
          continue;
       }
+      unsigned int dif_id=((unsigned int)buf[6]) | (((unsigned int)buf[7])<<8);
+      if ((arguments->module>=0) && (arguments->module != dif_id)) continue;
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
       int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
@@ -1491,15 +1535,11 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted asic*/
          for (bif_iterator = first_bif_iterator; bif_iterator <= bif_last_record; ++bif_iterator) {
             bif_roc = (int) bif_data[bif_iterator].ro_cycle - arguments->start_position;
-
             if (bif_roc > ROcycle) break; /*we jumped to another readout cycle with the bif_iterator*/
             if (bif_roc < ROcycle) continue; /*not yet in the correct readout cycle*/
-
             bif_bxid = (bif_data[bif_iterator].tdc - 0) / arguments->bxid_length;
-
             if ((bif_bxid) > (bxid + 1 + max_correlation / arguments->bxid_length)) break; /*we jumped to another bxid with the bif_iterator*/
             if ((bif_bxid) < bxid) continue;
-
             int startindex = arguments->bxid_length * (bif_bxid - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
             int endindex = startindex + arguments->bxid_length;
             if (startindex < 0) startindex = 0;
