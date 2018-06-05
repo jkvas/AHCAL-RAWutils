@@ -134,7 +134,7 @@ int analyze_noise(const struct arguments_t & arguments) {
 //   std::vector<u_int64_t> stopTSs; //maps start TS to ROC
    std::map<uint32_t, double> acqLens; //maps (LDA.Port.chip) to length of acq.
    std::map<uint32_t, int> acquisitions; //maps (LDA.Port.chip) to the number of acquisitions
-   double busy; //conversion + readout time
+   // double busy; //conversion + readout time
    double blocked; //not going to acquisition, although the busy is down (temperature, HGCAL...)
    std::map<uint32_t, int> ASIChits; //maps LDA.Port.Chip to number of hits without bxid0
    std::map<uint32_t, int> hits; //maps LDA.Port.Chip.Channel to number of hits without bxid0
@@ -164,11 +164,11 @@ int analyze_noise(const struct arguments_t & arguments) {
    int mismatches_length = 0;
    u_int32_t ROCLength = 0;
    /*BIF iteration variables*/
-   u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
-   u_int32_t bif_roc = 0;
-   int bif_bxid = 0;
+   // u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
+   // u_int32_t bif_roc = 0;
+   // int bif_bxid = 0;
 //   u_int64_t bif_tdc = 0;
-   u_int32_t matches = 0;
+   // u_int32_t matches = 0;
    u_int32_t headlen, headinfo;
    unsigned char b;
    int freadret; //return code
@@ -179,7 +179,7 @@ int analyze_noise(const struct arguments_t & arguments) {
 //   printf("#ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tintra_bxid_event\tROCLen\tmem_filled\n");
 
    int ROC = 0;
-   int within_ROC = 0;
+   // int within_ROC = 0;
    u_int64_t TS = 0;
    u_int64_t lastTS = 0;
    u_int64_t lastStartTS = 0;
@@ -211,7 +211,7 @@ int analyze_noise(const struct arguments_t & arguments) {
       // skip unwanted packets:
       if ( ((port==128) && ((headlen & 0xFFFF)==8)) ||
            //            ((port==160) && ((headlen & 0xFFFF)==16)) || we want timestamp
-           ((headinfo==0xa001000a) && ((headlen & 0xFFFF)==16)) || //temp
+           ((status==0xa0) && ((headlen & 0xFFFF)==16)) || //temp
            ((status==0x20) && ((headlen & 0xFFFF)==12))//EOR packet
          ) {
          fseek(fp,headlen & 0xFFFF, SEEK_CUR);//skip those packets
@@ -222,11 +222,12 @@ int analyze_noise(const struct arguments_t & arguments) {
          printf("#head=0x%08x %08x\n",headinfo,headlen);
          continue;
       }
-      if ((((headlen & 0xFFFF) - 12) % 146) && (port<0x60)) {
-         printf("#Wrong header length: %d in port %d\n",(headlen & 0xFFFF),port);
-         printf("#head=0x%08x %08x\n",headinfo,headlen);
-         continue;
-      }
+      // if ((((headlen & 0xFFFF) - 12) % 146) && (port<0x60)) {
+      //    printf("#Wrong header length: %d in port %d\n",(headlen & 0xFFFF),port);
+      //    printf("#head=0x%08x %08x\n",headinfo,headlen);
+      //    fseek(fp,headlen & 0xFFFF, SEEK_CUR);//skip those packets
+      //    continue;
+      // }
       if ((headlen & 0xFFFF) == 0x10) {
          //////////////////////////////////////////////////////////////////////////////
          // timestamp
@@ -263,7 +264,7 @@ int analyze_noise(const struct arguments_t & arguments) {
                ((u_int64_t) buf[5] << 40);
          if (type != 0x10) { //not trigger
             if (type == 0x01) {      //start acq
-               within_ROC = 1;
+               // within_ROC = 1;
 //               ROC = update_counter_modulo(ROC, newROC, 256, 1);
 //               std::cout << "#Start_ACQ ROC=" << ROC << std::endl;
                startTSs[ROC] = TS;
@@ -273,10 +274,10 @@ int analyze_noise(const struct arguments_t & arguments) {
 //               ROC = update_counter_modulo(ROC, newROC, 256, 1);
 //               std::cout << "#Stop_ACQ ROC=" << ROC << std::endl;
                stopTSs[ROC] = TS;
-               within_ROC = 0;
+               // within_ROC = 0;
                lastStopTS = TS;
             }
-            if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
+            // if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
             //         fseek(fp, 8, SEEK_CUR);
 //            int increment = (newROC - ROC) & 0xFF;
 //            if ((increment > 10) || (increment < -2)) {
@@ -305,7 +306,7 @@ int analyze_noise(const struct arguments_t & arguments) {
 //         fseek(fp, headlen & 0xFFFF, SEEK_CUR);         //skip timestamp packets
          continue;
       }
-      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 2);
+      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
       freadret = fread(buf, headlen & 0xFFF, 1, fp);
       if (!freadret) {
          printf("#unable to read the complete packet / EOF\n");
@@ -317,9 +318,23 @@ int analyze_noise(const struct arguments_t & arguments) {
       }
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8);            //extract the chipID from the packet
+      if ((port==9) && (asic>0xFF)) { //DEBUG
+         printf("#ERROR in chipid. length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
+         // printf("#");
+         // for (int i=0; i<(headlen & 0xFFF); i++){
+         //    printf("%02x",buf[i]);
+         // }
+         // printf("\n");
+	 continue;
+      }     
       if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
          mismatches_length++;
-         printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
+         printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d, port %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic, port);
+         // printf("#");
+         // for (int i=0; i<(headlen & 0xFFF); i++){
+         //    printf("%02x",buf[i]);
+         // }
+         // printf("\n");
 	 continue;
       }
       int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
