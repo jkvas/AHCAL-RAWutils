@@ -55,7 +55,7 @@ void argumentsPrint(const struct arguments_t & arguments) {
    std::cout << "#correlation_shift=" << arguments.correlation_shift << std::endl;
    std::cout << "#bxid_length=" << arguments.bxid_length << std::endl;
    std::cout << "#run_number=" << arguments.run_number << std::endl;
-   std::cout << "#max_rocs" << arguments.max_rocs << std::endl;
+   std::cout << "#max_rocs=" << arguments.max_rocs << std::endl;
 }
 
 void PrintHelp() {
@@ -197,29 +197,40 @@ int analyze_noise(const struct arguments_t & arguments) {
          perror("#unable to read / EOF\n");
          break;
       }
-      if (b != 0xCD) continue;/*try to look for second 0xCD. restart if not found*/
+      if (b != 0xCD) {
+         printf(".");
+         continue;/*try to look for second 0xCD. restart if not found*/
+      }
+      
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
-      lda = headinfo & 0xFF;
+      lda = headinfo & 0xFF; 
       port = (headinfo >> 8) & 0xFF;
-      if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("#Too big header length: %d", headlen & 0xffff);
+      unsigned int errors = (headinfo >> 16) & 0xFF;
+      unsigned int status = (headinfo >> 24) & 0xFF;
+      // skip unwanted packets:
+      if ( ((port==128) && ((headlen & 0xFFFF)==8)) ||
+           //            ((port==160) && ((headlen & 0xFFFF)==16)) || we want timestamp
+           ((headinfo==0xa001000a) && ((headlen & 0xFFFF)==16)) || //temp
+           ((status==0x20) && ((headlen & 0xFFFF)==12))//EOR packet
+         ) {
+         fseek(fp,headlen & 0xFFFF, SEEK_CUR);//skip those packets
          continue;
       }
-      if (((headlen & 0xFFFF) - 12) % 146) {
-         printf("#Wrong header length: %d in port %d",(headlen & 0xFFFF),port);
+      if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
+         printf("#Wrong header length: %d\n", headlen & 0xffff);
+         printf("#head=0x%08x %08x\n",headinfo,headlen);
+         continue;
+      }
+      if ((((headlen & 0xFFFF) - 12) % 146) && (port<0x60)) {
+         printf("#Wrong header length: %d in port %d\n",(headlen & 0xFFFF),port);
+         printf("#head=0x%08x %08x\n",headinfo,headlen);
          continue;
       }
       if ((headlen & 0xFFFF) == 0x10) {
          //////////////////////////////////////////////////////////////////////////////
          // timestamp
          //////////////////////////////////////////////////////////////////////////////
-         int newROC = (headlen >> 16) & 0xFF;
-         ROC = update_counter_modulo(ROC, newROC, 256, 1);
-	 if (arguments.max_rocs && (ROC>arguments.max_rocs)) {
-	    std::cout<<"#Maximum ROC number reached"<<std::endl;
-	    break;
-	 }
          if (fread(buf, 8, 1, fp) <= 0) {
             std::cout << "error read 2" << std::endl;
             continue;
@@ -228,6 +239,12 @@ int analyze_noise(const struct arguments_t & arguments) {
             fseek(fp, 8, SEEK_CUR);
             continue;
          }
+         int newROC = (headlen >> 16) & 0xFF;
+         ROC = update_counter_modulo(ROC, newROC, 256, 100);
+	 if (arguments.max_rocs && (ROC>arguments.max_rocs)) {
+	    std::cout<<"#Maximum ROC number reached"<<std::endl;
+	    break;
+	 }
          int type = buf[4];
          int trigid = ((int) buf[6]) + (((int) buf[7]) << 8); //possible trigid
          if (fread(buf, 8, 1, fp) <= 0) {
@@ -295,7 +312,7 @@ int analyze_noise(const struct arguments_t & arguments) {
          break;
       }
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
-         printf("no spiroc data packet!\n");
+         printf("no spiroc data packet! #head=0x%08x %08x\n",headinfo,headlen);
          continue;
       }
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
