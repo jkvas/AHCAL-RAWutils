@@ -126,6 +126,130 @@ unsigned int getMipCut(const double mips, const int lda, const int port, const i
    return arguments.adc_cut; //TODO channel+memcell-wise pedestal estimator
 }
 
+void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, std::map<uint16_t, bool> >& ROCtriggers, std::map<int, u_int64_t>& startTSs,std::map<int, u_int64_t>& stopTSs) {
+   unsigned char buf[4096];
+   FILE *fp;
+   if (!(fp = fopen(arguments.spiroc_raw_filename, "r"))) {
+      perror("#Unable to open the spiroc raw file\n");
+      return;
+   }
+
+   uint8_t lda = 0;
+   uint8_t port = 0;
+   u_int32_t headlen, headinfo;
+   unsigned char b;
+   int freadret; //return code
+   u_int32_t ROcycle = -1;
+   u_int64_t TS = 0;
+   u_int64_t lastTS = 0;
+   u_int64_t lastStartTS = 0;
+   u_int64_t lastStopTS = 0;
+   while (1) {
+      freadret = fread(&b, sizeof(b), 1, fp);
+      if (!freadret) {
+         printf("#unable to read / EOF\n");
+         break;
+      }
+      if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
+
+      freadret = fread(&b, sizeof(b), 1, fp);
+      if (!freadret) {
+         perror("#unable to read / EOF\n");
+         break;
+      }
+      if (b != 0xCD) {
+         printf("!");
+         continue;/*try to look for second 0xCD. restart if not found*/
+      }
+
+      freadret = fread(&headlen, sizeof(headlen), 1, fp);
+      freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
+      lda = headinfo & 0xFF;
+      port = (headinfo >> 8) & 0xFF;
+      unsigned int errors = (headinfo >> 16) & 0xFF;
+      unsigned int status = (headinfo >> 24) & 0xFF;
+      // skip unwanted packets:
+      if (((headlen & 0xFFFF) != 16) || //not a timestamp
+            //            ((port==160) && ((headlen & 0xFFFF)==16)) || we want timestamp
+            ((status == 0xa0) && ((headlen & 0xFFFF) == 16)) //temp
+            ) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip those packets
+         continue;
+      }
+      if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
+         continue;
+      }
+      if ((headlen & 0xFFFF) == 0x10) {
+         //////////////////////////////////////////////////////////////////////////////
+         // timestamp
+         //////////////////////////////////////////////////////////////////////////////
+         if (fread(buf, 8, 1, fp) <= 0) {
+            std::cout << "error read 2" << std::endl;
+            continue;
+         }
+         if ((buf[0] != 0x45) || (buf[1] != 0x4D) || (buf[2] != 0x49) || (buf[3] != 0x54)) {         //TIME header
+            fseek(fp, 8, SEEK_CUR);
+            continue;
+         }
+         int newROC = (headlen >> 16) & 0xFF;
+         ROcycle = update_counter_modulo(ROcycle, newROC, 256, 100);
+         if (arguments.max_rocs && ((int) ROcycle > arguments.max_rocs)) {
+            std::cout << "#Maximum ROC number reached" << std::endl;
+            break;
+         }
+         int type = buf[4];
+         int trigid = ((int) buf[6]) + (((int) buf[7]) << 8); //possible trigid
+         if (fread(buf, 8, 1, fp) <= 0) {
+            std::cout << "error read 3" << std::endl;
+            continue;
+         }
+         if ((buf[6] != 0xAB) || (buf[7] != 0xAB)) {
+            std::cout << "error read 4: packet not finished with abab" << std::endl;
+            continue;
+         }
+         TS = (u_int64_t) buf[0] +
+               ((u_int64_t) buf[1] << 8) +
+               ((u_int64_t) buf[2] << 16) +
+               ((u_int64_t) buf[3] << 24) +
+               ((u_int64_t) buf[4] << 32) +
+               ((u_int64_t) buf[5] << 40);
+         switch (type) {
+            case 0x01: //start_acq
+               // within_ROC = 1;
+               startTSs[ROcycle] = TS;
+               lastStartTS = TS;
+               break;
+            case 0x02:               //stop_acq
+               stopTSs[ROcycle] = TS;
+               // within_ROC = 0;
+               lastStopTS = TS;
+               break;
+            case 0x10: {               //trig
+               // std::cout << "#Trigger TS packet ROC=" << ROC << std::endl;
+               uint16_t trigBXID = ((TS - lastStartTS) - arguments.correlation_shift) / arguments.bxid_length;
+               ROCtriggers[ROcycle][trigBXID] = true;
+            }
+               break;
+            case 0x20:               //busy - not interresting here
+               break;
+            default:
+               break;
+         }
+         lastTS = TS;
+         continue;
+         //////////////////////////////////////////////////////////////////////////////
+         // end timestamp
+         //////////////////////////////////////////////////////////////////////////////
+         continue;
+      }
+      //data packet
+      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
+      fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip those packets
+   }
+   fclose(fp);
+   std::cout << "#Trigger read finished. at ROC=" << ROcycle << std::endl;
+}
+
 int analyze_noise(const struct arguments_t & arguments) {
    unsigned char buf[4096];
    std::map<int, u_int64_t> startTSs; //maps start TS to ROC
@@ -141,12 +265,14 @@ int analyze_noise(const struct arguments_t & arguments) {
    std::map<uint32_t, int> hitsAfterAdcCut; //maps LDA.Port.Chip.Channel to number of hits without bxid0 after the ADC cut
    std::map<uint32_t, std::map<uint16_t, bool>> ROCtriggers; // map of map of triggers on ROC
    std::map<uint32_t, uint64_t> ADCsum; //maps LDA.Port.Chip.Channel to the ADC summary
+
+   if (arguments.reject_validated) prefetch_triggers(arguments, ROCtriggers,startTSs,stopTSs);
+
    FILE *fp;
    if (!(fp = fopen(arguments.spiroc_raw_filename, "r"))) {
       perror("#Unable to open the spiroc raw file\n");
       return -1;
    }
-
    /*spiroc datafile iteration*/
    uint8_t lda = 0;
    uint8_t port = 0;
@@ -212,6 +338,7 @@ int analyze_noise(const struct arguments_t & arguments) {
       if (((port == 128) && ((headlen & 0xFFFF) == 8)) ||
             //            ((port==160) && ((headlen & 0xFFFF)==16)) || we want timestamp
             ((status == 0xa0) && ((headlen & 0xFFFF) == 16)) || //temp
+            ((headlen & 0xFFFF) == 16) || //timestamp
             ((status == 0x20) && ((headlen & 0xFFFF) == 12)) //EOR packet
             ) {
          fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip those packets
@@ -228,84 +355,6 @@ int analyze_noise(const struct arguments_t & arguments) {
       //    fseek(fp,headlen & 0xFFFF, SEEK_CUR);//skip those packets
       //    continue;
       // }
-      if ((headlen & 0xFFFF) == 0x10) {
-         //////////////////////////////////////////////////////////////////////////////
-         // timestamp
-         //////////////////////////////////////////////////////////////////////////////
-         if (fread(buf, 8, 1, fp) <= 0) {
-            std::cout << "error read 2" << std::endl;
-            continue;
-         }
-         if ((buf[0] != 0x45) || (buf[1] != 0x4D) || (buf[2] != 0x49) || (buf[3] != 0x54)) {
-            fseek(fp, 8, SEEK_CUR);
-            continue;
-         }
-         int newROC = (headlen >> 16) & 0xFF;
-         ROC = update_counter_modulo(ROC, newROC, 256, 100);
-         if (arguments.max_rocs && (ROC > arguments.max_rocs)) {
-            std::cout << "#Maximum ROC number reached" << std::endl;
-            break;
-         }
-         int type = buf[4];
-         int trigid = ((int) buf[6]) + (((int) buf[7]) << 8); //possible trigid
-         if (fread(buf, 8, 1, fp) <= 0) {
-            std::cout << "error read 3" << std::endl;
-            continue;
-         }
-         if ((buf[6] != 0xAB) || (buf[7] != 0xAB)) {
-            std::cout << "error read 4: packet not finished with abab" << std::endl;
-            continue;
-         }
-         TS = (u_int64_t) buf[0] +
-               ((u_int64_t) buf[1] << 8) +
-               ((u_int64_t) buf[2] << 16) +
-               ((u_int64_t) buf[3] << 24) +
-               ((u_int64_t) buf[4] << 32) +
-               ((u_int64_t) buf[5] << 40);
-         if (type != 0x10) { //not trigger
-            if (type == 0x01) {      //start acq
-               // within_ROC = 1;
-//               ROC = update_counter_modulo(ROC, newROC, 256, 1);
-//               std::cout << "#Start_ACQ ROC=" << ROC << std::endl;
-               startTSs[ROC] = TS;
-               lastStartTS = TS;
-            }
-            if (type == 0x02) {      //stop_acq
-//               ROC = update_counter_modulo(ROC, newROC, 256, 1);
-//               std::cout << "#Stop_ACQ ROC=" << ROC << std::endl;
-               stopTSs[ROC] = TS;
-               // within_ROC = 0;
-               lastStopTS = TS;
-            }
-            // if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
-            //         fseek(fp, 8, SEEK_CUR);
-//            int increment = (newROC - ROC) & 0xFF;
-//            if ((increment > 10) || (increment < -2)) {
-//               std::cout << "#ERROR wrong increment of ROC: " << increment << " . ROC=" << ROC << ", newROC=" << newROC << std::endl;
-//               continue;
-//            }
-//            //      fprintf(stdout, "old ROC=%d, increment=%d\n", ROC, increment);
-//            ROC = ROC + increment;
-            //      fprintf(stdout, "%05d\t%05d\t%llu\t%d\t%d\t%lli\t#trigid,roc,TS,withinROC,ROCincrement,triggerTSinc\n", trigid, ROC, TS, within_ROC, increment, TS - lastTS);
-            //TODO triggers
-//            if ((bif_data_index < C_MAX_BIF_EVENTS) && (within_ROC == 1)) {/*if the data index is in range*/
-//               bif_data[bif_data_index].ro_cycle = (u_int32_t) ROC; // - first_shutter;
-//               bif_data[bif_data_index].tdc = (TS - lastStartTS); // << 5;
-//               bif_data[bif_data_index++].trig_count = trigid;
-//            }
-            lastTS = TS;
-            continue;
-         } else {
-//            std::cout << "#Trigger TS packet ROC=" << ROC << std::endl;
-            uint16_t trigBXID = ((TS - lastStartTS) - arguments.correlation_shift) / arguments.bxid_length;
-            ROCtriggers[ROC][trigBXID] = true;
-         }
-         //////////////////////////////////////////////////////////////////////////////
-         // end timestamp
-         //////////////////////////////////////////////////////////////////////////////
-//         fseek(fp, headlen & 0xFFFF, SEEK_CUR);         //skip timestamp packets
-         continue;
-      }
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
       freadret = fread(buf, headlen & 0xFFF, 1, fp);
       if (!freadret) {
@@ -354,8 +403,6 @@ int analyze_noise(const struct arguments_t & arguments) {
          std::cout << "#Readout cycle length=" << ROCLength << " too long. ROC=" << ROcycle
                << " Startroc=" << startTSs[ROcycle] << " StopROC=" << stopTSs[ROcycle] << std::endl;
       }
-
-//      int first_bif_iterator = get_first_iterator2(arguments, bif_data, ROcycle);
 
       //fill the asic-wise information
       acquisitions[((lda << 16) | (port << 8) | (asic & 0xFF))]++;
