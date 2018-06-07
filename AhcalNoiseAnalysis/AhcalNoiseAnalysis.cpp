@@ -27,13 +27,13 @@ const struct option long_opts[] = {
 };
 
 struct arguments_t {
-   char *spiroc_raw_filename;
-   int adc_cut;
-   bool reject_validated;
-   int correlation_shift;
-   int bxid_length;
-   int run_number;
-   int max_rocs;
+      char *spiroc_raw_filename;
+      int adc_cut;
+      bool reject_validated;
+      int correlation_shift;
+      int bxid_length;
+      int run_number;
+      int max_rocs;
 };
 
 struct arguments_t arguments;
@@ -201,25 +201,25 @@ int analyze_noise(const struct arguments_t & arguments) {
          printf(".");
          continue;/*try to look for second 0xCD. restart if not found*/
       }
-      
+
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
-      lda = headinfo & 0xFF; 
+      lda = headinfo & 0xFF;
       port = (headinfo >> 8) & 0xFF;
       unsigned int errors = (headinfo >> 16) & 0xFF;
       unsigned int status = (headinfo >> 24) & 0xFF;
       // skip unwanted packets:
-      if ( ((port==128) && ((headlen & 0xFFFF)==8)) ||
-           //            ((port==160) && ((headlen & 0xFFFF)==16)) || we want timestamp
-           ((status==0xa0) && ((headlen & 0xFFFF)==16)) || //temp
-           ((status==0x20) && ((headlen & 0xFFFF)==12))//EOR packet
-         ) {
-         fseek(fp,headlen & 0xFFFF, SEEK_CUR);//skip those packets
+      if (((port == 128) && ((headlen & 0xFFFF) == 8)) ||
+            //            ((port==160) && ((headlen & 0xFFFF)==16)) || we want timestamp
+            ((status == 0xa0) && ((headlen & 0xFFFF) == 16)) || //temp
+            ((status == 0x20) && ((headlen & 0xFFFF) == 12)) //EOR packet
+            ) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip those packets
          continue;
       }
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
          printf("#Wrong header length: %d\n", headlen & 0xffff);
-         printf("#head=0x%08x %08x\n",headinfo,headlen);
+         printf("#head=0x%08x %08x\n", headinfo, headlen);
          continue;
       }
       // if ((((headlen & 0xFFFF) - 12) % 146) && (port<0x60)) {
@@ -242,10 +242,10 @@ int analyze_noise(const struct arguments_t & arguments) {
          }
          int newROC = (headlen >> 16) & 0xFF;
          ROC = update_counter_modulo(ROC, newROC, 256, 100);
-	 if (arguments.max_rocs && (ROC>arguments.max_rocs)) {
-	    std::cout<<"#Maximum ROC number reached"<<std::endl;
-	    break;
-	 }
+         if (arguments.max_rocs && (ROC > arguments.max_rocs)) {
+            std::cout << "#Maximum ROC number reached" << std::endl;
+            break;
+         }
          int type = buf[4];
          int trigid = ((int) buf[6]) + (((int) buf[7]) << 8); //possible trigid
          if (fread(buf, 8, 1, fp) <= 0) {
@@ -313,29 +313,30 @@ int analyze_noise(const struct arguments_t & arguments) {
          break;
       }
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
-         printf("no spiroc data packet! #head=0x%08x %08x\n",headinfo,headlen);
+         printf("no spiroc data packet! #head=0x%08x %08x\n", headinfo, headlen);
          continue;
       }
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8);            //extract the chipID from the packet
-      if ((port==9) && (asic>0xFF)) { //DEBUG
+      if ((port == 9) && (asic > 0xFF)) { //DEBUG
          printf("#ERROR in chipid. length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
          // printf("#");
          // for (int i=0; i<(headlen & 0xFFF); i++){
          //    printf("%02x",buf[i]);
          // }
          // printf("\n");
-	 continue;
-      }     
+         continue;
+      }
       if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
          mismatches_length++;
-         printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d, port %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic, port);
+         printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d, port %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic,
+               port);
          // printf("#");
          // for (int i=0; i<(headlen & 0xFFF); i++){
          //    printf("%02x",buf[i]);
          // }
          // printf("\n");
-	 continue;
+         continue;
       }
       int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
 //    printf("#memory cells: %d\n", memcell_filled);
