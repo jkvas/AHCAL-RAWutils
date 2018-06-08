@@ -13,7 +13,7 @@
 
 using namespace std;
 
-const char* const short_opts = "w:vrluhm";
+const char* const short_opts = "w:vrluhmd";
 const struct option long_opts[] = {
       { "spiroc_raw_filename", required_argument, nullptr, 'w' },
       { "reject_validated", no_argument, nullptr, 'v' },
@@ -22,6 +22,7 @@ const struct option long_opts[] = {
       { "run_number", required_argument, nullptr, 'u' },
       { "max_rocs", required_argument, nullptr, 'm' },
       { "adc_cut", required_argument, nullptr, 'c' },
+      { "dummy_triggers", required_argument, nullptr, 'd' },
       { "help", no_argument, nullptr, 'h' },
       { nullptr, 0, nullptr, 0 }
 };
@@ -34,6 +35,7 @@ struct arguments_t {
       int bxid_length;
       int run_number;
       int max_rocs;
+      int dummy_triggers;
 };
 
 struct arguments_t arguments;
@@ -46,6 +48,7 @@ void argumentsInit(struct arguments_t & arguments) {
    arguments.bxid_length = 160;
    arguments.run_number = 0;
    arguments.max_rocs = 0;
+   arguments.dummy_triggers = 0;
 }
 
 void argumentsPrint(const struct arguments_t & arguments) {
@@ -56,6 +59,7 @@ void argumentsPrint(const struct arguments_t & arguments) {
    std::cout << "#bxid_length=" << arguments.bxid_length << std::endl;
    std::cout << "#run_number=" << arguments.run_number << std::endl;
    std::cout << "#max_rocs=" << arguments.max_rocs << std::endl;
+   std::cout << "#dummy_triggers=" << arguments.dummy_triggers << std::endl;
 }
 
 void PrintHelp() {
@@ -68,6 +72,7 @@ void PrintHelp() {
    std::cout << "   -v, --reject_validated" << std::endl;
    std::cout << "   -m, --max_roc" << std::endl;
    std::cout << "   -c, --adc_cut" << std::endl;
+   std::cout << "   -d, --dummy_triggers" << std::endl;
    std::cout << "   -h, --help" << std::endl;
    exit(1);
 }
@@ -99,6 +104,9 @@ void ProcessArgs(int argc, char** argv) {
          case 'c':
             arguments.adc_cut = std::atoi(optarg);
             break;
+         case 'd':
+            arguments.dummy_triggers = std::atoi(optarg);
+            break;
          case 'h': // -h or --help
          case '?': // Unrecognized option
          default:
@@ -126,7 +134,8 @@ unsigned int getMipCut(const double mips, const int lda, const int port, const i
    return arguments.adc_cut; //TODO channel+memcell-wise pedestal estimator
 }
 
-void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, std::map<uint16_t, bool> >& ROCtriggers, std::map<int, u_int64_t>& startTSs,std::map<int, u_int64_t>& stopTSs) {
+void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, std::map<uint16_t, bool> >& ROCtriggers, std::map<int, u_int64_t>& startTSs,
+      std::map<int, u_int64_t>& stopTSs) {
    unsigned char buf[4096];
    FILE *fp;
    if (!(fp = fopen(arguments.spiroc_raw_filename, "r"))) {
@@ -158,7 +167,7 @@ void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, s
          break;
       }
       if (b != 0xCD) {
-         printf("!");
+         //printf("!");
          continue;/*try to look for second 0xCD. restart if not found*/
       }
 
@@ -257,7 +266,8 @@ int analyze_noise(const struct arguments_t & arguments) {
 //   std::vector<u_int64_t> startTSs; //maps start TS to ROC
 //   std::vector<u_int64_t> stopTSs; //maps start TS to ROC
    std::map<uint32_t, double> acqLens; //maps (LDA.Port.chip) to length of acq.
-   std::map<uint32_t, int> acquisitions; //maps (LDA.Port.chip) to the number of acquisitions
+//   std::map<uint32_t, int> acquisitions; //maps (LDA.Port.chip) to the number of acquisitions
+   double globalLength = 0.0;
    // double busy; //conversion + readout time
    double blocked; //not going to acquisition, although the busy is down (temperature, HGCAL...)
    std::map<uint32_t, int> ASIChits; //maps LDA.Port.Chip to number of hits without bxid0
@@ -266,8 +276,25 @@ int analyze_noise(const struct arguments_t & arguments) {
    std::map<uint32_t, std::map<uint16_t, bool>> ROCtriggers; // map of map of triggers on ROC
    std::map<uint32_t, uint64_t> ADCsum; //maps LDA.Port.Chip.Channel to the ADC summary
 
-   if (arguments.reject_validated) prefetch_triggers(arguments, ROCtriggers,startTSs,stopTSs);
+   prefetch_triggers(arguments, ROCtriggers, startTSs, stopTSs);
 
+   //calculate the global duration
+   for (const auto& it : startTSs) {
+      if (stopTSs.count(it.first)) {
+         uint64_t start = it.second;
+         uint64_t stop = stopTSs.at(it.first);
+         if ((start == 0) || (stop == 0)) {
+            std::cout << "#No start or stop TS in roc=" << it.first << " start=" << start << " stop=" << stop << std::endl;
+            continue;
+         }
+         uint64_t duration = stop - start - arguments.correlation_shift;
+         if (duration > 4000000) { //(4000000 = 100 ms)
+            std::cout << "#Run length invalid in roc=" << it.first << " length=" << duration << " (" << ((25E-9) * duration) << " s)" << std::endl;
+            continue;
+         }
+         globalLength += ((25.0E-9) * duration);
+      }
+   }
    FILE *fp;
    if (!(fp = fopen(arguments.spiroc_raw_filename, "r"))) {
       perror("#Unable to open the spiroc raw file\n");
@@ -324,7 +351,7 @@ int analyze_noise(const struct arguments_t & arguments) {
          break;
       }
       if (b != 0xCD) {
-         printf(".");
+         //printf(".");
          continue;/*try to look for second 0xCD. restart if not found*/
       }
 
@@ -391,6 +418,7 @@ int analyze_noise(const struct arguments_t & arguments) {
 //    printf("#memory cells: %d\n", memcell_filled);
 
       if (startTSs.count(ROcycle) && stopTSs.count(ROcycle)) {
+         //OK, both timestamp exist
 //      if (startTSs[ROcycle] && stopTSs[ROcycle]) {
 //         std::cout << "timestamp for ROC " << ROcycle << "exists" << std::endl;
       } else {
@@ -398,18 +426,28 @@ int analyze_noise(const struct arguments_t & arguments) {
          continue;
       }
       u_int64_t ROCLength = stopTSs[ROcycle] - startTSs[ROcycle] - arguments.correlation_shift;
-      if (memcell_filled == 16) ROCLength = (buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;
+      acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += 0;
+      if (memcell_filled == 16) {
+         uint64_t ROCLength2 = (buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;
+         std::cout << "#DEBUG length difference\t";
+         std::cout << ((int64_t) ROCLength - (int64_t) ROCLength2);
+         std::cout << "\t" << ROCLength << "\t" << ROCLength2;
+         std::cout << "\t" << ROcycle << "\t" << asic << "\t" << (unsigned int) port;
+         std::cout << std::endl;
+         //TODO calculate the shortening and store
+         //TODO more asics in one layer should not shorten the cycle more!!!
+         //acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += ((double) 0.000000025) * ROCLength;
+      }
       if (ROCLength > 4096 * arguments.bxid_length) {
          std::cout << "#Readout cycle length=" << ROCLength << " too long. ROC=" << ROcycle
                << " Startroc=" << startTSs[ROcycle] << " StopROC=" << stopTSs[ROcycle] << std::endl;
       }
 
       //fill the asic-wise information
-      acquisitions[((lda << 16) | (port << 8) | (asic & 0xFF))]++;
-      acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += ((double) 0.000000025) * ROCLength;
-      ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))] += memcell_filled - 1;
+//      acquisitions[((lda << 16) | (port << 8) | (asic & 0xFF))]++;
+      ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))] += memcell_filled - arguments.dummy_triggers;         // - 1;
 
-      for (memcell = 1; memcell < memcell_filled; ++memcell) {
+      for (memcell = arguments.dummy_triggers; memcell < memcell_filled; ++memcell) {
 //         if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted asic*/
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
@@ -420,7 +458,6 @@ int analyze_noise(const struct arguments_t & arguments) {
          }
          for (channel = 0; channel < 36; ++channel) {
 //            if ((arguments->channel != -1) && (channel != arguments->channel)) continue;/*ship data from unwanted channel*/
-
             tdc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1)]
                   | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 1] << 8);
             adc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2]
@@ -450,26 +487,28 @@ int analyze_noise(const struct arguments_t & arguments) {
    std::cout << "#Mismatched hit bits: " << mismatches_hit << std::endl;
    std::cout << "#Mismatched gain bits: " << mismatches_gain << std::endl;
    for (const auto &it : acqLens) {
+      //it.first = LDA<<16 | port <<8 | chip
       std::cout << "#LDA\tport\tasic\tchannel\ttotal_lenth[s]\thits\thit_cut\tasicHit\tacqs\tfreq\tavglen\tavAdc\tADCsum" << std::endl;
       std::cout << "#1\t2\t3\t4\t5\t\t6\t7\t8\t9\t10\t11\t12\t13" << std::endl;
-      uint32_t index2 = it.first << 8;
+      uint32_t index2 = it.first << 8; //LDA<<24 | port<<16 | chip<<8 | channel
       for (int ch = 0; ch < 36; ch++) {
          std::cout << ((it.first >> 16) & 0xFF) << "\t" << std::flush;
          std::cout << ((it.first >> 8) & 0xFF) << "\t" << std::flush;
          std::cout << ((it.first >> 0) & 0xFF) << "\t" << std::flush;
          std::cout << ch << "\t" << std::flush;
-         printf("%f\t", it.second);
+         printf("%f\t", globalLength);
+//         printf("%f\t", it.second);
          std::cout << hits[index2 | ch] << "\t" << std::flush;
          std::cout << hitsAfterAdcCut[index2 | ch] << "\t" << std::flush;
          std::cout << ASIChits[it.first] << "\t" << std::flush;
-         std::cout << acquisitions[it.first] << "\t" << std::flush;
-         if (it.second > 0.0001) {
-            printf("%.1f\t", (((double) 1.0) * (hits[index2 | ch] - hitsAfterAdcCut[index2 | ch]) / it.second));
+         std::cout << ROcycle << "\t" << std::flush;
+         if (globalLength > 0.0001) {
+            printf("%.1f\t", (((double) 1.0) * (hits[index2 | ch] - hitsAfterAdcCut[index2 | ch]) / globalLength));
          } else {
             printf("NaN\t");
          }
          std::cout << std::flush;
-         printf("%.2f\t", 1000.0 * it.second / acquisitions[it.first]);
+         printf("%.2f\t", 1000.0 * globalLength / ROcycle);
          std::cout << std::flush;
          if (hits[index2 | ch] != 0) {
             std::cout << ADCsum[index2 | ch] / hits[index2 | ch] << "\t" << std::flush;
