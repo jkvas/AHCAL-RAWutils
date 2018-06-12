@@ -23,6 +23,7 @@ const struct option long_opts[] = {
       { "max_rocs", required_argument, nullptr, 'm' },
       { "adc_cut", required_argument, nullptr, 'c' },
       { "dummy_triggers", required_argument, nullptr, 'd' },
+      { "debug", no_argument, nullptr, 'b' },
       { "help", no_argument, nullptr, 'h' },
       { nullptr, 0, nullptr, 0 }
 };
@@ -36,6 +37,7 @@ struct arguments_t {
       int run_number;
       int max_rocs;
       int dummy_triggers;
+      bool debug;
 };
 
 struct arguments_t arguments;
@@ -49,6 +51,7 @@ void argumentsInit(struct arguments_t & arguments) {
    arguments.run_number = 0;
    arguments.max_rocs = 0;
    arguments.dummy_triggers = 0;
+   arguments.debug = false;
 }
 
 void argumentsPrint(const struct arguments_t & arguments) {
@@ -60,6 +63,7 @@ void argumentsPrint(const struct arguments_t & arguments) {
    std::cout << "#run_number=" << arguments.run_number << std::endl;
    std::cout << "#max_rocs=" << arguments.max_rocs << std::endl;
    std::cout << "#dummy_triggers=" << arguments.dummy_triggers << std::endl;
+   std::cout << "#debug=" << arguments.debug << std::endl;
 }
 
 void PrintHelp() {
@@ -78,6 +82,8 @@ void PrintHelp() {
 }
 
 void ProcessArgs(int argc, char** argv) {
+   std::cout << "#dummy_triggers=" << arguments.dummy_triggers << std::endl;
+
    while (true) {
       const auto opt = getopt_long(argc, argv, short_opts, long_opts, nullptr);
       if (-1 == opt)
@@ -107,6 +113,9 @@ void ProcessArgs(int argc, char** argv) {
          case 'd':
             arguments.dummy_triggers = std::atoi(optarg);
             break;
+         case 'b':
+            arguments.debug = true;
+            break;
          case 'h': // -h or --help
          case '?': // Unrecognized option
          default:
@@ -134,8 +143,12 @@ unsigned int getMipCut(const double mips, const int lda, const int port, const i
    return arguments.adc_cut; //TODO channel+memcell-wise pedestal estimator
 }
 
-void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, std::map<uint16_t, bool> >& ROCtriggers, std::map<int, u_int64_t>& startTSs,
-      std::map<int, u_int64_t>& stopTSs) {
+void prefetch_information(const struct arguments_t& arguments,
+      std::map<uint32_t, std::map<uint16_t, bool> >& ROCtriggers,
+      std::map<int, u_int64_t>& startTSs,
+      std::map<int, u_int64_t>& stopTSs,
+      std::map<int, u_int64_t>& busyTSs,
+      std::map<int, int>& memcells) {
    unsigned char buf[4096];
    FILE *fp;
    if (!(fp = fopen(arguments.spiroc_raw_filename, "r"))) {
@@ -153,6 +166,7 @@ void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, s
    u_int64_t lastTS = 0;
    u_int64_t lastStartTS = 0;
    u_int64_t lastStopTS = 0;
+   int within_ROC = 0;
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
@@ -178,9 +192,11 @@ void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, s
       unsigned int errors = (headinfo >> 16) & 0xFF;
       unsigned int status = (headinfo >> 24) & 0xFF;
       // skip unwanted packets:
-      if (((headlen & 0xFFFF) != 16) || //not a timestamp
+      if (((port == 128) && ((headlen & 0xFFFF) == 8)) ||
             //            ((port==160) && ((headlen & 0xFFFF)==16)) || we want timestamp
-            ((status == 0xa0) && ((headlen & 0xFFFF) == 16)) //temp
+            ((status == 0xa0) && ((headlen & 0xFFFF) == 16)) || //temp
+            //     ((headlen & 0xFFFF) == 16) || //timestamp
+            ((status == 0x20) && ((headlen & 0xFFFF) == 12)) //EOR packet
             ) {
          fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip those packets
          continue;
@@ -224,13 +240,13 @@ void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, s
                ((u_int64_t) buf[5] << 40);
          switch (type) {
             case 0x01: //start_acq
-               // within_ROC = 1;
+               within_ROC = 1;
                startTSs[ROcycle] = TS;
                lastStartTS = TS;
                break;
             case 0x02:               //stop_acq
                stopTSs[ROcycle] = TS;
-               // within_ROC = 0;
+               within_ROC = 0;
                lastStopTS = TS;
                break;
             case 0x10: {               //trig
@@ -239,7 +255,8 @@ void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, s
                ROCtriggers[ROcycle][trigBXID] = true;
             }
                break;
-            case 0x20:               //busy - not interresting here
+            case 0x21:               //busy - not interresting here
+               busyTSs[ROcycle - (1 - within_ROC)] = TS;
                break;
             default:
                break;
@@ -249,10 +266,16 @@ void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, s
          //////////////////////////////////////////////////////////////////////////////
          // end timestamp
          //////////////////////////////////////////////////////////////////////////////
-         continue;
       }
       //data packet
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
+      int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
+//      std::cout << "#d" << memcell_filled << std::endl;
+      if (memcells.count(ROcycle)) {
+         if (memcell_filled > memcells[ROcycle]) memcells[ROcycle] = memcell_filled;
+      } else {
+         memcells[ROcycle] = memcell_filled;
+      }
       fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip those packets
    }
    fclose(fp);
@@ -262,7 +285,9 @@ void prefetch_triggers(const struct arguments_t& arguments, std::map<uint32_t, s
 int analyze_noise(const struct arguments_t & arguments) {
    unsigned char buf[4096];
    std::map<int, u_int64_t> startTSs; //maps start TS to ROC
-   std::map<int, u_int64_t> stopTSs; //maps start TS to ROC
+   std::map<int, u_int64_t> stopTSs; //maps stop TS to ROC
+   std::map<int, u_int64_t> busyTSs; //maps busy TS to ROC
+   std::map<int, int> memcells; //maps maximum memcell filled in the ROC to ROC
 //   std::vector<u_int64_t> startTSs; //maps start TS to ROC
 //   std::vector<u_int64_t> stopTSs; //maps start TS to ROC
    std::map<uint32_t, double> acqLens; //maps (LDA.Port.chip) to length of acq.
@@ -276,7 +301,7 @@ int analyze_noise(const struct arguments_t & arguments) {
    std::map<uint32_t, std::map<uint16_t, bool>> ROCtriggers; // map of map of triggers on ROC
    std::map<uint32_t, uint64_t> ADCsum; //maps LDA.Port.Chip.Channel to the ADC summary
 
-   prefetch_triggers(arguments, ROCtriggers, startTSs, stopTSs);
+   prefetch_information(arguments, ROCtriggers, startTSs, stopTSs, busyTSs, memcells);
 
    //calculate the global duration
    for (const auto& it : startTSs) {
@@ -427,12 +452,21 @@ int analyze_noise(const struct arguments_t & arguments) {
       }
       u_int64_t ROCLength = stopTSs[ROcycle] - startTSs[ROcycle] - arguments.correlation_shift;
       acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += 0;
-      if (memcell_filled == 16) {
-         uint64_t ROCLength2 = (buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;
+      if (arguments.debug) {
+         //uint64_t ROCLength2 = (buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;
+         int last_bxid = buf[8 + 36 * 4 * memcell_filled] | (buf[8 + 36 * 4 * memcell_filled + 1] << 8);
          std::cout << "#DEBUG length difference\t";
-         std::cout << ((int64_t) ROCLength - (int64_t) ROCLength2);
-         std::cout << "\t" << ROCLength << "\t" << ROCLength2;
-         std::cout << "\t" << ROcycle << "\t" << asic << "\t" << (unsigned int) port;
+         std::cout << ((int64_t) ROCLength - (int64_t) last_bxid * arguments.bxid_length);
+         std::cout << "\t" << ROCLength;
+         std::cout << "\t" << last_bxid * arguments.bxid_length;
+         std::cout << "\t" << last_bxid;
+         std::cout << "\t" << ROcycle;
+         std::cout << "\t" << asic;
+         std::cout << "\t" << (unsigned int) port;
+         std::cout << "\t" << memcell_filled;
+         std::cout << "\t" << memcells[ROcycle];
+         std::cout << "\t" << busyTSs[ROcycle] - startTSs[ROcycle] - arguments.correlation_shift;
+         std::cout << "\t" << (int64_t) stopTSs[ROcycle] - (int64_t) busyTSs[ROcycle];
          std::cout << std::endl;
          //TODO calculate the shortening and store
          //TODO more asics in one layer should not shorten the cycle more!!!
