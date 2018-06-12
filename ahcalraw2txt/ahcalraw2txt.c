@@ -43,6 +43,8 @@ static struct argp_option options[] =
             { "histogram", 'i', 0, 0, "Print histogram instead of events" },
             { "rebin", 'n', "BINNING", 0, "histogram will be rebinned" },
             { "from_trigger_time", 265, "TDC_BIN", 0, "minimal external external trigger time (mind the bxid length" },
+            { "from_cycle", 270, "ROC", 0, "minimal readout cycle" },
+            { "to_cycle", 271, "ROC", 0, "maximal readout cycle" },
             { "to_trigger_time", 266, "TDC_BIN", 0, "maximal external trigger time (mind the bxid length" },           
             { "run_number", 'u', "RUN_NUMBER", 0, "Run number used for the prints" },
             { "empty_bxid_only", 'y',0, 0, "uses only BXID, which doesn't have any hitbit. require_hitbit is not allowed" },
@@ -80,6 +82,8 @@ struct arguments_t {
    int dif_id;
    int lda_port;
    int report_EOR;
+   int from_cycle;
+   int to_cycle;
 };
 struct arguments_t arguments;
 
@@ -114,6 +118,9 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->dif_id = -1;
    arguments->lda_port = -1;
    arguments->report_EOR = 0;
+   arguments->from_cycle = 0;
+   arguments->to_cycle = 0x7FFFFFFF; /* max_int */
+   
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -147,6 +154,8 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#dif_id=%d\n",arguments->dif_id);
    printf("#lda_port=%d\n",arguments->lda_port);
    printf("#report_EOR=%d\n",arguments->report_EOR);   
+   printf("#from_cycle=%d\n",arguments->from_cycle);
+   printf("#to_cycle=%d\n",arguments->to_cycle);   
    printf("# --- END PROGRAM PARAMETERS ---\n");
 }
 
@@ -243,6 +252,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
          break;
       case 269:
          arguments->report_EOR = atoi(arg);
+         break;
+      case 270:
+         arguments->from_cycle = atoi(arg);
+         break;
+      case 271:
+         arguments->to_cycle = atoi(arg);
          break;
       case ARGP_KEY_END:
          if ((arguments->spiroc_raw_filename == NULL)) {
@@ -402,7 +417,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          //continue;
       }
       //      fprintf(stdout, "old ROC=%d, increment=%d\n", ROC, increment);
-      ROC = ROC + increment;
+      /* ROC = ROC + increment; */
       //      fprintf(stdout, "%05d\t%05d\t%llu\t%d\t%d\t%lli\t#trigid,roc,TS,withinROC,ROCincrement,triggerTSinc\n", trigid, ROC, TS, within_ROC, increment, TS - lastTS);
       if ((bif_data_index < C_MAX_BIF_EVENTS) && (within_ROC == 1)) {/*if the data index is in range*/
          bif_data[bif_data_index].ro_cycle = (u_int32_t) ROC; // - first_shutter;
@@ -729,6 +744,9 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          printf("#unable to read the complete packet / EOF\n");
          break;
       }
+      if (ROcycle < arguments->from_cycle) continue;
+      if (ROcycle > (arguments->to_cycle+100)) break; /* for sure out of the range. let's stop */
+      if (ROcycle > arguments->to_cycle) continue;    /* continue reading - some earlier roc can still appear */
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
 //			printf("no spiroc data packet!\n");
          if (arguments->report_EOR>1) {
