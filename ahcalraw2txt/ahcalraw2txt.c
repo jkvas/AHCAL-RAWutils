@@ -658,7 +658,6 @@ int getPedestal(const int chip, const int channel, const int memcell, const int 
    return 0; //TODO
 }
 int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
-   
    int port_EORs[256];
    for (int i=0 ; i < (sizeof(port_EORs)/sizeof(port_EORs[0])); i++){
       port_EORs[i]=0;
@@ -708,7 +707,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
    u_int32_t ROcycle = -1;
    if (!(arguments->histogram)) {
       printf("#1\t2\t3\t4\t5\t6\t7\t8\t9\t10\t11\t12\t13\t14\t15\n");
-      printf("#ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tROCLen\tmem_filled\n");
+      printf("#ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tROCLen\tmem_filled\tport\tdifid\n");
    }
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
@@ -886,6 +885,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
                //                  printf("%d\t", same_bif_bxid_index);
                printf("%d\t", ROCLength);
                printf("%d\t", memcell_filled);
+               printf("%d\t", lda_port);
+               printf("%d\t", dif_id);
                if (adc_hit != tdc_hit) printf("\t#mismatched_tdc_hit");
                if (adc_gain != tdc_gain) printf("\t#mismatched_tdc_gain");
                printf("\n");
@@ -903,6 +904,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
                printf("NaN\t");
                printf("NaN\t");
                printf("%d\t", memcell_filled);
+               printf("%d\t", lda_port);
+               printf("%d\t", dif_id);
                if (adc_hit != tdc_hit) printf("\t#mismatched_tdc_hit");
                if (adc_gain != tdc_gain) printf("\t#mismatched_tdc_gain");
                printf("\n");
