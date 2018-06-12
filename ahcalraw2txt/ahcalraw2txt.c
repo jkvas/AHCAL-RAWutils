@@ -48,7 +48,7 @@ static struct argp_option options[] =
             { "to_trigger_time", 266, "TDC_BIN", 0, "maximal external trigger time (mind the bxid length" },           
             { "run_number", 'u', "RUN_NUMBER", 0, "Run number used for the prints" },
             { "empty_bxid_only", 'y',0, 0, "uses only BXID, which doesn't have any hitbit. require_hitbit is not allowed" },
-            
+            { "load_triggers", 272, 0, 0, "forces loading triggers into the memory" },            
             { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -84,6 +84,7 @@ struct arguments_t {
    int report_EOR;
    int from_cycle;
    int to_cycle;
+   int load_triggers;
 };
 struct arguments_t arguments;
 
@@ -120,7 +121,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->report_EOR = 0;
    arguments->from_cycle = 0;
    arguments->to_cycle = 0x7FFFFFFF; /* max_int */
-   
+   arguments->load_triggers = 0;
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -155,7 +156,9 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#lda_port=%d\n",arguments->lda_port);
    printf("#report_EOR=%d\n",arguments->report_EOR);   
    printf("#from_cycle=%d\n",arguments->from_cycle);
-   printf("#to_cycle=%d\n",arguments->to_cycle);   
+   printf("#to_cycle=%d\n",arguments->to_cycle);
+   printf("#load_triggers=%d\n",arguments->load_triggers);
+   
    printf("# --- END PROGRAM PARAMETERS ---\n");
 }
 
@@ -258,6 +261,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
          break;
       case 271:
          arguments->to_cycle = atoi(arg);
+         break;
+      case 272:
+         arguments->load_triggers = 1;
          break;
       case ARGP_KEY_END:
          if ((arguments->spiroc_raw_filename == NULL)) {
@@ -954,7 +960,7 @@ int main(int argc, char **argv) {
    argp_parse(&argp, argc, argv, 0, 0, &arguments);
 //   fprintf(of, "hi\n");
    arguments_print(&arguments);
-   if (arguments.triggered_only || arguments.triggered_reject){
+   if (arguments.triggered_only || arguments.triggered_reject || arguments.load_triggers){
       if (arguments.bif_filename == NULL) {
 	 load_timestamps_from_ahcal_raw(&arguments, bif_data, &bif_last_record);
       } else {
