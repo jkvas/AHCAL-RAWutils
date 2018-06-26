@@ -39,6 +39,7 @@ static struct argp_option options[] =
             { "reject_gainbit", 258, 0, 0, "Filter only the gainbit==0 data (low gain)" },
             { "dif_id", 267, "NUM", 0, "use only specified DIF-ID number" },
             { "lda_port", 268, "NUM", 0, "use only LDA port" },
+            { "lda_number", 273, "NUM", 0, "use only specific LDA number (typically 10, 11, 12)" },
             { "report_EOR", 269,"LEVEL", 0, "report of EOR packets [0=off,1=summary,2=details" },
             { "histogram", 'i', 0, 0, "Print histogram instead of events" },
             { "rebin", 'n', "BINNING", 0, "histogram will be rebinned" },
@@ -81,6 +82,7 @@ struct arguments_t {
    int to_trigger_time;
    int dif_id;
    int lda_port;
+   int lda_number;
    int report_EOR;
    int from_cycle;
    int to_cycle;
@@ -118,6 +120,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->to_trigger_time= 1000000;
    arguments->dif_id = -1;
    arguments->lda_port = -1;
+   arguments->lda_number = -1;
    arguments->report_EOR = 0;
    arguments->from_cycle = 0;
    arguments->to_cycle = 0x7FFFFFFF; /* max_int */
@@ -154,6 +157,7 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#to_trigger_time=%d\n", arguments->to_trigger_time);
    printf("#dif_id=%d\n",arguments->dif_id);
    printf("#lda_port=%d\n",arguments->lda_port);
+   printf("#lda_number=%d\n",arguments->lda_number);
    printf("#report_EOR=%d\n",arguments->report_EOR);   
    printf("#from_cycle=%d\n",arguments->from_cycle);
    printf("#to_cycle=%d\n",arguments->to_cycle);
@@ -252,6 +256,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
          break;
       case 268:
          arguments->lda_port = atoi(arg);
+         break;
+      case 273:
+         arguments->lda_number = atoi(arg);
          break;
       case 269:
          arguments->report_EOR = atoi(arg);
@@ -679,6 +686,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
    memset(hist_ch_tdc, 0, sizeof hist_ch_tdc);
    /*spiroc datafile iteration*/
    int lda_port = 0;
+   int lda_number = 0;
    int dif_id = 0;
    int ro_chain = 0;
    int asic_index = 0;
@@ -741,6 +749,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          continue;
       }
       lda_port = (headinfo & 0xFF00)>>8;
+      lda_number = headinfo & 0xFF;
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
 //		printf("%05d\t", row_index);
 //		printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
@@ -768,6 +777,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          continue;
       }
       if ((arguments->lda_port != -1 ) && (lda_port != arguments->lda_port) ) continue;
+      if ((arguments->lda_number != -1 ) && (lda_number != arguments->lda_number) ) continue;
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       dif_id = buf[6] | (buf[7]<<8);//16-bit DIF ID
