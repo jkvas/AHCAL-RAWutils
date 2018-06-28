@@ -36,7 +36,6 @@ static struct argp_option options[] =
             { "reject_gainbit", 258, 0, 0, "Filter only the gainbit==0 data (low gain)" },
             { "even_bxid_only", 263, 0, 0, "Filter only even bxids(0,2,4,...)" },
             { "odd_bxid_only", 264, 0, 0, "Filter only odd bxids (1,3,...)" },
-            { "reject_gainbit", 258, 0, 0, "Filter only the gainbit==0 data (low gain)" },
             { "dif_id", 267, "NUM", 0, "use only specified DIF-ID number" },
             { "lda_port", 268, "NUM", 0, "use only LDA port" },
             { "lda_number", 273, "NUM", 0, "use only specific LDA number (typically 10, 11, 12)" },
