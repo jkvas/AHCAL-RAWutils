@@ -354,6 +354,21 @@ int update_counter_modulo(unsigned int oldvalue, unsigned int newvalue_modulo, u
    return newvalue;
 }
 
+/* recodes a partially decoded gray number. the 16-bit number is partially decoded for bits 0-11. */
+u_int16_t grayRecode(const u_int16_t partiallyDecoded) {
+   u_int16_t Gray = partiallyDecoded;
+   u_int16_t highPart = 0; //bits 12-15 are not decoded
+   while (Gray & 0xF000) {
+      highPart ^= Gray;
+      Gray >>= 1;
+   }
+   if (highPart & 0x1000) {
+      return ((highPart & 0xF000) | ((~partiallyDecoded) & 0xFFF)); //invert the originally decoded data (the bits 0-11)
+   } else {
+      return ((highPart & 0xF000) | (partiallyDecoded & 0xFFF)); //combine the low and high part
+   }
+}
+
 int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t * bif_data, int * bif_last_record) {
    printf("#start reading BIF data from AHCAL raw data\n");
    int bif_data_index = 0;
@@ -959,6 +974,7 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
          if (memcell > arguments->maximum_memcell) continue;
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         bxid = grayRecode(bxid);
          if (bxid < arguments->minimum_bxid) continue;
          if (bxid > arguments->maximum_bxid) continue;
          for (channel = 0; channel < 36; ++channel) {
@@ -1222,6 +1238,7 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
       for (memcell = arguments->minimum_memcell; memcell < memcell_filled; ++memcell) {
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         bxid = grayRecode(bxid);
          if (memcell > arguments->maximum_memcell) continue;
          for (channel = 0; channel < 36; ++channel) {
             if ((arguments->channel != -1) && (channel != arguments->channel)) continue; /*ship data from unwanted channel*/
@@ -1375,7 +1392,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
             //get correlations for  what is in the BXIDs array
             int first_bif_iterator = get_first_iterator2(arguments, bif_data, roc_prev);
             //fprintf(stdout, ".");
-            for (bxid = 0; bxid < 4096; bxid++) {
+            for (bxid = arguments->minimum_bxid; bxid <= arguments->maximum_bxid; bxid++) {
                if (BXIDs[bxid]) {
                   for (bif_iterator = first_bif_iterator; bif_iterator <= bif_last_record; ++bif_iterator) {
                      bif_roc = (int) bif_data[bif_iterator].ro_cycle - arguments->start_position;
@@ -1438,6 +1455,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          if (memcell > arguments->maximum_memcell) continue;
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         bxid = grayRecode(bxid);
          BXIDs[bxid & 0x0FFF] = 1;
       }
 
@@ -1543,6 +1561,7 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          if (memcell > arguments->maximum_memcell) continue;
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         bxid = grayRecode(bxid);
          for (bif_iterator = first_bif_iterator; bif_iterator <= bif_last_record; ++bif_iterator) {
             bif_roc = (int) bif_data[bif_iterator].ro_cycle - arguments->start_position;
             if (bif_roc > ROcycle) break; /*we jumped to another readout cycle with the bif_iterator*/
@@ -1682,7 +1701,7 @@ int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t *
          if (ROcycle >= 0) {
             //get correlations for  what is in the BXIDs array
             int lastbxid = 0; //dummy trigger
-            for (bxid = 0; bxid < 4096; bxid++) {
+            for (bxid = arguments->minimum_bxid; bxid <= arguments->maximum_bxid; bxid++) {
                if (BXIDs[bxid]) {
                   BXIDs[bxid] = 0;
                   if (arguments->bxid_spacing == 2) {/*in mode 1 the AHCAL BXIDs have to pass the BIF correlation criteria*/
@@ -1758,6 +1777,7 @@ int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t *
          if (memcell > arguments->maximum_memcell) continue;
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         bxid = grayRecode(bxid);
          if ((bxid == 0) || (bxid > 4096)) {
             printf("\n# ERROR! BXID %d (0x%04X) found in ROC %05d asic %03d memcell %02d (of %d). Header: 0x%04x%04x\n", bxid, bxid, ROcycle, asic, memcell,
                   memcell_filled - 1, headinfo, headlen);
