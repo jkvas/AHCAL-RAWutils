@@ -911,21 +911,21 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         printf("unable to read / EOF\n");
+         printf("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
 
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         perror("unable to read / EOF\n");
+         perror("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for second 0xCD. restart if not found*/
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
       if ((headlen & 0xFFFF) == 0x10) {
@@ -950,7 +950,7 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
 //		printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
       freadret = fread(buf, headlen & 0xFFF, 1, fp);
       if (!freadret) {
-         printf("unable to read the complete packet / EOF\n");
+         printf("#unable to read the complete packet / EOF\n");
          break;
       }
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
@@ -1097,20 +1097,20 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         printf("unable to read / EOF\n");
+         printf("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         perror("unable to read / EOF\n");
+         perror("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for second 0xCD. restart if not found*/
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
       if ((headlen & 0xFFFF) == 0x10) {
