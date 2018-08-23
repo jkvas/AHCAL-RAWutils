@@ -575,7 +575,8 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
                fprintf(stdout, "%05d\t", trig_counter);
                fprintf(stdout, "%llu\t", (long long unsigned int) finetime_trig);
                fprintf(stdout, "%d\t", within_ROC);
-               for (int i=3; i>=0; i--){
+	       int i;
+               for (i=3; i>=0; i--){
                   if ( details & (1<<(8+i))) {fprintf(stdout,"%x",i);} else {fprintf(stdout,".");};
                }
                fprintf(stdout, "\t");
