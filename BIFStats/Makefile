@@ -1,8 +1,8 @@
 TARGET = BIFstats
-LIBS = -lm
+#LIBS = -lm
 CC = gcc
 CFLAGS = -Wall -O3
-LDFLAGS = -static
+#LDFLAGS = -static
 
 .PHONY: clean all default
 
