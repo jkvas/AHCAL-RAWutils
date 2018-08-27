@@ -671,7 +671,8 @@ int getPedestal(const int chip, const int channel, const int memcell, const int 
 }
 int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
    int port_EORs[256];
-   for (int i=0 ; i < (sizeof(port_EORs)/sizeof(port_EORs[0])); i++){
+   int i;
+   for (i=0 ; i < (sizeof(port_EORs)/sizeof(port_EORs[0])); i++){
       port_EORs[i]=0;
    }
    FILE *fp;
@@ -764,7 +765,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
 //			printf("no spiroc data packet!\n");
          if (arguments->report_EOR>1) {
             printf("%d\t%d\tinfo=0x%08x len=0x%08x, data=",ROcycle,lda_port,headinfo, headlen);
-            for (int i=0; i<freadret; i++){
+	    int i;
+            for (i=0; i<freadret; i++){
                if ((i&0x03)==0) printf(" ");
                printf("%02x",buf[i]);
             }
@@ -952,7 +954,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
    printf("#Matched %d\n",matches);
    printf("#Entries %d\n",entries);
    if (arguments->report_EOR>0){
-      for (int i=0 ; i < (sizeof(port_EORs)/sizeof(port_EORs[0])); i++){
+      int i;
+      for (i=0 ; i < (sizeof(port_EORs)/sizeof(port_EORs[0])); i++){
          printf("#port=%d; EORs=%d\n",i,port_EORs[i]);
       }
    }
