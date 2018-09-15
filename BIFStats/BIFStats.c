@@ -32,8 +32,8 @@ static struct argp_option options[] =
    { "print_cycles", 258, 0, 0, "print readout cycle informationtrigger entries" },
    { "roc_offset", 259, "OFFSET", 0, "readout cycle number adjustment" },
    { "trig_num_offset", 260, "OFFSET", 0, "Trigger number adjustemnt" },
-   { "run_number", 'n', "RUN_NUMBER", 0, "Run number used for the prints" },
-   
+   { "ignored_gaps_ms", 'g', "MS", 0, "Do not include into statistics gaps longed than MS milisecond s. Default=5000 ms" },
+   { "run_number", 'n', "RUN_NUMBER", 0, "Run number used for the prints" },   
    { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -50,6 +50,7 @@ struct arguments_t {
    int run_number;
    int roc_offset;
    int trig_num_offset;
+   int ignored_gaps_ms;
 //   int print_bif_start_phases;
 };
 struct arguments_t arguments;
@@ -68,6 +69,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->print_cycles = 0;
    arguments->roc_offset = 0;
    arguments->trig_num_offset = 0;
+   arguments->ignored_gaps_ms = 5000;
 //   arguments->print_bif_start_phases = 0;
 }
 
@@ -84,6 +86,7 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#print_cycles=%d\n",arguments->print_cycles);
    printf("#roc_offset=%d\n",arguments->roc_offset);
    printf("#trig_num_offset=%d\n",arguments->trig_num_offset);
+   printf("#ignored_gaps_ms=%d\n",arguments->ignored_gaps_ms);
 }
 
 /* Parse a single option. */
@@ -98,6 +101,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       break;
    case 'd':
       arguments->trig_data_from_spiroc_raw = 1;
+      break;
+   case 'g':
+      arguments->ignored_gaps_ms = atoi(arg);
       break;
    case 'l':
       arguments->bxid_length = atoi(arg);
@@ -136,7 +142,6 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 //			argp_usage(state);
 //			argp_state_help(state, state->err_stream, ARGP_HELP_USAGE);
          break;
-
       default:
          return ARGP_ERR_UNKNOWN;
    }
@@ -202,6 +207,7 @@ typedef struct {
    u_int64_t OnTime;
    u_int64_t RunStart;
    u_int64_t RunFinish;
+   u_int64_t IgnoredGaps;
 } stats_t;
 
 char * rocphases = NULL;
@@ -219,7 +225,7 @@ int update_counter_modulo(unsigned int oldvalue, unsigned int newvalue_modulo, u
 
 int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t * bif_data, int * bif_last_record) {
    printf("#start reading BIF data from AHCAL raw data\n");
-   stats_t stats={0,0,0LLU,0LLU,0LLU};
+   stats_t stats={0,0,0LLU,0LLU,0LLU,0LLU};
 
    int bif_data_index = 0;
    int i;
@@ -412,7 +418,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
 
 int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int * bif_last_record) {
    printf("#start reading BIF data\n");
-   stats_t stats={0,0,0LLU,0LLU,0LLU};
+   stats_t stats={0,0,0LLU,0LLU,0LLU,0LLU};
 //	int j = 0;
    int bif_data_index = 0;
    int i;
@@ -502,11 +508,16 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
             //start acquisition
 //				printf("%llu\t%llu\t%llu\t#start acq\n", time, time - oldtime_fcmd, shutter_cnt);
 	    //if (arguments->realign_bif_starts > -100) time = ((time + arguments->realign_bif_starts) & (0xFFFFFFFFFFFFFFF8LLU));// - arguments->realign_bif_starts ;
-            if ((time - oldtime_fcmd) > (40000LLU * arguments->report_gaps_ms)) {
-               fprintf(stdout, "#Long gap before start: raw=%llu,\tFrom0=%llu,\ttime_s=%f\n", 
-		       (long long unsigned int) shutter_cnt, 
-		       (long long unsigned int) (shutter_cnt-first_shutter), 
-		       (25.0E-9)*(time - oldtime_fcmd));
+            if (oldtime_fcmd) {
+               if ((time - oldtime_fcmd) > (40000LLU * arguments->report_gaps_ms)) {
+                  fprintf(stdout, "#Long gap before start: raw=%llu,\tFrom0=%llu,\ttime_s=%f\n", 
+                          (long long unsigned int) shutter_cnt, 
+                          (long long unsigned int) (shutter_cnt-first_shutter), 
+                          (25.0E-9)*(time - oldtime_fcmd));
+               }
+               if ((time - oldtime_fcmd) > (40000LLU * arguments->ignored_gaps_ms)) {
+                  stats.IgnoredGaps += (time - oldtime_fcmd);
+               }
             }
 	    u_int32_t bif_start_phase = ((u_int32_t)time)&(C_START_PHASES_LENGTH - 1);
 	    //printf("%d\t%d\t#Phase\n", bif_start_phase, (u_int32_t)shutter_cnt);//DEBUG
@@ -539,12 +550,16 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    printf("RunNr:%d\n",arguments->run_number);
    printf("#ROCs[count]:%llu\n", (long long unsigned int) (shutter_cnt-first_shutter));
    printf("#ROC/s:%.1f\n",((long long unsigned int) (shutter_cnt-first_shutter))/(25E-9*(stats.RunFinish-stats.RunStart)));
+   printf("#ROC_without_gaps/s:%.1f\n",((long long unsigned int) (shutter_cnt-first_shutter))/(25E-9*(stats.RunFinish-stats.RunStart-stats.IgnoredGaps)));
    printf("#Triggers[count]:%d\n",stats.triggers);
    printf("#Length[s]:%.1f\n",25E-9*(stats.RunFinish-stats.RunStart));
+   printf("#Length_without_gaps[s]:%.1f\n",25E-9*(stats.RunFinish-stats.RunStart-stats.IgnoredGaps));
    printf("#AvgROCLength[s]:%.2f\n",25E-6*(stats.OnTime)/ (shutter_cnt-first_shutter));
    printf("#ontime[s]:%.1f\n",25E-9*(stats.OnTime));
    printf("#ontime[%%]:%.1f\n",100.0 * (stats.OnTime) / (stats.RunFinish-stats.RunStart) );
+   printf("#ontime_without_gaps[%%]:%.1f\n",100.0 * (stats.OnTime) / (stats.RunFinish-stats.RunStart-stats.IgnoredGaps) );
    printf("#Triggers/s:%.2f\n",stats.triggers/(25E-9*(stats.RunFinish-stats.RunStart)));
+   printf("#Triggers_without_gaps/s:%.2f\n",stats.triggers/(25E-9*(stats.RunFinish-stats.RunStart-stats.IgnoredGaps)));
    printf("#Triggers/ROC:%.2f\n",1.0*stats.triggers/ (long long unsigned int) (shutter_cnt-first_shutter));
    printf("#Phase:%d\n",phase);
    printf("#Start:%f\n",25E-9*stats.RunStart);
@@ -552,12 +567,16 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    printf("%d\t",arguments->run_number);
    printf("%llu\t", (long long unsigned int) (shutter_cnt-first_shutter));
    printf("%.1f\t",((long long unsigned int) (shutter_cnt-first_shutter))/(25E-9*(stats.RunFinish-stats.RunStart)));
+   printf("%.1f\t",((long long unsigned int) (shutter_cnt-first_shutter))/(25E-9*(stats.RunFinish-stats.RunStart-stats.IgnoredGaps)));
    printf("%d\t",stats.triggers);
    printf("%.1f\t",25E-9*(stats.RunFinish-stats.RunStart));
+   printf("%.1f\t",25E-9*(stats.RunFinish-stats.RunStart-stats.IgnoredGaps));
    printf("%.2f\t",25E-6*(stats.OnTime)/ (shutter_cnt-first_shutter));
    printf("%.1f\t",25E-9*(stats.OnTime));
    printf("%.1f\t",100.0 * (stats.OnTime) / (stats.RunFinish-stats.RunStart) );
+   printf("%.1f\t",100.0 * (stats.OnTime) / (stats.RunFinish-stats.RunStart-stats.IgnoredGaps) );
    printf("%.2f\t",stats.triggers/(25E-9*(stats.RunFinish-stats.RunStart)));
+   printf("%.2f\t",stats.triggers/(25E-9*(stats.RunFinish-stats.RunStart-stats.IgnoredGaps)));
    printf("%.2f\t",1.0*stats.triggers/ (long long unsigned int) (shutter_cnt-first_shutter));
    printf("%d\t",phase);
    printf("%.1f\t",25E-9*stats.RunStart);

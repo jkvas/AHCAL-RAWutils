@@ -31,7 +31,7 @@ static struct argp_option options[] =
             { "start_position", 't', "START_POSITION", 0, "Start ROC offset in the BIF data. (=-1 when BIF starts from 0 and AHCAL from 1)" },
             { "correlation_shift", 'r', "RELATIVE_TIMESTAMP", 0, "Correlation timestamp, which synchronizes BXIDs between BIF and SPIROC. Default:13448" },
             { "shift_scan_max", 'n', "SHIFT_SCAN_MAX", 0, "Do the scan for offset values between AHCAL and BIF from 0 to the given maximum. Results are calculated event-wise (every BXID is counted only once for the whole detector). Default:-1, maximum: 2000000" },
-            { "shift_scan_method", 'e', "METHOD_NUMBER", 0, "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice)\n2=channel-wise: only specified channel is used. Default:0" },
+            { "shift_scan_method", 'e', "METHOD_NUMBER", 0, "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice). Fastest.\n2=channel-wise: only specified channel is used. Default:0" },
             { "bif_trigger_spacing", 'g', 0, 0, "print the time distance between particles as BXID and timestamp differences. Correct offset should be given" },
             { "minimum_bxid", 257, "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
             { "maximum_bxid", 258, "MAX_BXID", 0, "BXIDs greater than MAX_BXID will be ignored. Default:4095" },
@@ -1328,8 +1328,8 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
    for (; i < max_correlation; i++) {
       scan[i] = 0;
    }
-   unsigned char BXIDs[4096];
-   for (i = 0; i < 4096; i++) {
+   unsigned char BXIDs[65536];
+   for (i = 0; i < 65536; i++) {
       BXIDs[i] = 0;
    }
 
@@ -1457,7 +1457,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
          bxid = grayRecode(bxid);
-         BXIDs[bxid & 0x0FFF] = 1;
+         BXIDs[bxid] = 1;
       }
 
 //    printf("\n");
@@ -1651,8 +1651,8 @@ int trigger_spacing_from_raw_bif(struct arguments_t * arguments, const BIF_recor
 
 int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
    int i = 0;
-   unsigned char BXIDs[4096];
-   for (i = 0; i < 4096; i++) {
+   unsigned char BXIDs[65536];
+   for (i = 0; i < 65536; i++) {
       BXIDs[i] = 0;
    }
 
@@ -1789,12 +1789,10 @@ int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t *
             }
             printf("\n");
          }
-         BXIDs[bxid & 0x0FFF] = 1;
-         printf("#%d\t", bxid);
+         BXIDs[bxid & 0xFFFF] = 1;
+         /* printf("#%d\t", bxid); */
       }
       printf("\n");
-
-//    printf("\n");
    }
    fclose(fp);
    return 0;
