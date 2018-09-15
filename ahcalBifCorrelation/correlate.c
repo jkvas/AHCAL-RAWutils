@@ -1327,7 +1327,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
    for (; i < max_correlation; i++) {
       scan[i] = 0;
    }
-   unsigned char BXIDs[4096];
+   unsigned char BXIDs[65536];
    for (i = 0; i < 4096; i++) {
       BXIDs[i] = 0;
    }
@@ -1456,7 +1456,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
          bxid = grayRecode(bxid);
-         BXIDs[bxid & 0x0FFF] = 1;
+         BXIDs[bxid] = 1;
       }
 
 //    printf("\n");
@@ -1650,7 +1650,7 @@ int trigger_spacing_from_raw_bif(struct arguments_t * arguments, const BIF_recor
 
 int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
    int i = 0;
-   unsigned char BXIDs[4096];
+   unsigned char BXIDs[65536];
    for (i = 0; i < 4096; i++) {
       BXIDs[i] = 0;
    }
@@ -1788,7 +1788,7 @@ int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t *
             }
             printf("\n");
          }
-         BXIDs[bxid & 0x0FFF] = 1;
+         BXIDs[bxid] = 1;
          printf("#%d\t", bxid);
       }
       printf("\n");
