@@ -31,7 +31,7 @@ static struct argp_option options[] =
             { "start_position", 't', "START_POSITION", 0, "Start ROC offset in the BIF data. (=-1 when BIF starts from 0 and AHCAL from 1)" },
             { "correlation_shift", 'r', "RELATIVE_TIMESTAMP", 0, "Correlation timestamp, which synchronizes BXIDs between BIF and SPIROC. Default:13448" },
             { "shift_scan_max", 'n', "SHIFT_SCAN_MAX", 0, "Do the scan for offset values between AHCAL and BIF from 0 to the given maximum. Results are calculated event-wise (every BXID is counted only once for the whole detector). Default:-1, maximum: 2000000" },
-            { "shift_scan_method", 'e', "METHOD_NUMBER", 0, "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice)\n2=channel-wise: only specified channel is used. Default:0" },
+            { "shift_scan_method", 'e', "METHOD_NUMBER", 0, "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice). Fastest.\n2=channel-wise: only specified channel is used. Default:0" },
             { "bif_trigger_spacing", 'g', 0, 0, "print the time distance between particles as BXID and timestamp differences. Correct offset should be given" },
             { "minimum_bxid", 257, "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
             { "maximum_bxid", 258, "MAX_BXID", 0, "BXIDs greater than MAX_BXID will be ignored. Default:4095" },
@@ -575,7 +575,8 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
                fprintf(stdout, "%05d\t", trig_counter);
                fprintf(stdout, "%llu\t", (long long unsigned int) finetime_trig);
                fprintf(stdout, "%d\t", within_ROC);
-               for (int i=3; i>=0; i--){
+	       int i;
+               for (i=3; i>=0; i--){
                   if ( details & (1<<(8+i))) {fprintf(stdout,"%x",i);} else {fprintf(stdout,".");};
                }
                fprintf(stdout, "\t");
@@ -910,21 +911,21 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         printf("unable to read / EOF\n");
+         printf("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
 
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         perror("unable to read / EOF\n");
+         perror("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for second 0xCD. restart if not found*/
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
       if ((headlen & 0xFFFF) == 0x10) {
@@ -949,7 +950,7 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
 //		printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
       freadret = fread(buf, headlen & 0xFFF, 1, fp);
       if (!freadret) {
-         printf("unable to read the complete packet / EOF\n");
+         printf("#unable to read the complete packet / EOF\n");
          break;
       }
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
@@ -1096,20 +1097,20 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         printf("unable to read / EOF\n");
+         printf("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
-         perror("unable to read / EOF\n");
+         perror("#unable to read / EOF\n");
          break;
       }
       if (b != 0xCD) continue;/*try to look for second 0xCD. restart if not found*/
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
       if ((headlen & 0xFFFF) == 0x10) {
@@ -1328,7 +1329,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
       scan[i] = 0;
    }
    unsigned char BXIDs[65536];
-   for (i = 0; i < 4096; i++) {
+   for (i = 0; i < 65536; i++) {
       BXIDs[i] = 0;
    }
 
@@ -1651,7 +1652,7 @@ int trigger_spacing_from_raw_bif(struct arguments_t * arguments, const BIF_recor
 int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
    int i = 0;
    unsigned char BXIDs[65536];
-   for (i = 0; i < 4096; i++) {
+   for (i = 0; i < 65536; i++) {
       BXIDs[i] = 0;
    }
 
@@ -1788,12 +1789,10 @@ int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t *
             }
             printf("\n");
          }
-         BXIDs[bxid] = 1;
-         printf("#%d\t", bxid);
+         BXIDs[bxid & 0xFFFF] = 1;
+         /* printf("#%d\t", bxid); */
       }
       printf("\n");
-
-//    printf("\n");
    }
    fclose(fp);
    return 0;

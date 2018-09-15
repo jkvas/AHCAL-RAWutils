@@ -1,8 +1,11 @@
 TARGET = ahcalbifcorrelate
-LIBS = -lm
+LIBS = 
+#LIBS = -lm
 CC = gcc
 CFLAGS = -Wall -O3
-LDFLAGS = -static
+LDFLAGS = 
+#static libraries are often not available. for static:
+#LIBS = -static
 
 .PHONY: clean all default
 
