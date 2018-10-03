@@ -915,7 +915,6 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
          break;
       }
       if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
-
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
          perror("#unable to read / EOF\n");
@@ -933,13 +932,15 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
          //fprintf(stdout, "#TS packet\n");
          continue;
       }
-      
       int lda_port = (headinfo >> 8) & 0xFF;
+      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+         continue;
+      }
       if (lda_port >= C_MAX_PORTS) {
          printf("#ERROR: wrong LDA port: %d\n", lda_port);
          continue;         //wrong port number
       }
-      
       ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 0x80);
       /* if (((headlen >> 16) & 0xFF) != roc_prev) { */
       /*    roc_prev = ((headlen >> 16) & 0xFF); */
@@ -1119,6 +1120,10 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
          continue;
       }
       int lda_port = (headinfo >> 8) & 0xFF;
+      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+         continue;
+      }
       if (lda_port >= C_MAX_PORTS) {
          printf("#ERROR: wrong LDA port: %d\n", lda_port);
          continue;         //wrong port number
@@ -1311,10 +1316,10 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
          maxval = scan[i];
       }
    }
-   printf("#maximum correlation at: %d\thits:%d", maxindex, maxval);
+   printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
    printf("#correlation scan\n#shift\thits\tnormalized\n");
    for (i = 0; i < max_correlation; i++) {
-      printf("%d\t%d\t%f\n", i, scan[i], scan[i] / (1.0 * maxval));
+      printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
    }
    return 0;
 }
@@ -1373,7 +1378,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("#wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
       if ((headlen & 0xFFFF) == 0x10) {
@@ -1382,6 +1387,10 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          continue;
       }
       int lda_port = (headinfo >> 8) & 0xFF;
+      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+         continue;
+      }
       if (lda_port >= C_MAX_PORTS) {
          printf("#ERROR: wrong LDA port: %d\n", lda_port);
          continue;         //wrong port number
@@ -1479,7 +1488,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
       }
    }
    printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
-   printf("#correlation scan\n#shift\thits\n");
+   printf("#correlation scan\n#shift\thits\tnormalized\n");
    for (i = 0; i < max_correlation; i++) {
       printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
    }
@@ -1532,6 +1541,10 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
          continue;
       }
       int lda_port = (headinfo >> 8) & 0xFF;
+      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+         continue;
+      }
       if (lda_port >= C_MAX_PORTS) {
          printf("#ERROR: wrong LDA port: %d\n", lda_port);
          continue;         //wrong port number
@@ -1603,7 +1616,7 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
    printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
    printf("#correlation scan\n#shift\thits\tnormalized\n");
    for (i = 0; i < max_correlation; i++) {
-      printf("%d\t%d\t%f\n", i, scan[i], scan[i] / (1.0 * maxval));
+      printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
    }
    return 0;
 }
