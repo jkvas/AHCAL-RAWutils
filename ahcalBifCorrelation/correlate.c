@@ -371,6 +371,9 @@ u_int16_t grayRecode(const u_int16_t partiallyDecoded) {
 
 int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t * bif_data, int * bif_last_record) {
    printf("#start reading BIF data from AHCAL raw data\n");
+   if ( (arguments->print_triggers)) {
+      fprintf(stdout, "#ROC\tTrigid\tTS\tinside_ROC\tROC_increment\tfrom_start\tfrom_last\tbxid\ttime_within_bxid\t#Trig\n");
+   }
    int bif_data_index = 0;
    int i;
    for (i = 0; i < C_MAX_BIF_EVENTS; ++i) {
@@ -491,7 +494,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          bif_data[bif_data_index++].trig_count = trigid;
       }
       if ( (arguments->print_triggers)) {
-         fprintf(stdout, "#%05d\t", ROC);
+         fprintf(stdout, "%05d\t", ROC);
          fprintf(stdout, "%05d\t", trigid);
          fprintf(stdout, "%llu\t", (long long unsigned int) TS);
          fprintf(stdout, "%d\t", within_ROC);
