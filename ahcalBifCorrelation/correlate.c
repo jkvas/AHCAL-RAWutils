@@ -502,9 +502,9 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          fprintf(stdout, "%lli\t", (long long int) TS - (long long int) lastStartTS);
          fprintf(stdout, "%lli\t", (long long int) TS - (long long int) lastTS);
          fprintf(stdout, "%lli\t",
-               (long long int) (((long long int) TS - (long long int) lastStartTS) - arguments->correlation_shift) / arguments->bxid_length);
+                 (long long int) (((long long int) TS - (long long int) lastStartTS) - (long long int) arguments->correlation_shift) / arguments->bxid_length);
          fprintf(stdout, "%lli\t",
-               (long long int) (((long long int) TS - (long long int) lastStartTS) - arguments->correlation_shift) % arguments->bxid_length);
+               (long long int) (((long long int) TS - (long long int) lastStartTS) - (long long int) arguments->correlation_shift) % arguments->bxid_length);
          fprintf(stdout, "#Trig \n");
       }
       lastTS = TS;
