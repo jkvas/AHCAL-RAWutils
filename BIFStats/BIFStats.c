@@ -391,7 +391,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    printf("#ROC/s:%.1f\n",((long long unsigned int) (stats.ROCs))/(25E-9*(stats.RunFinish-stats.RunStart)));
    printf("#Triggers[count]:%d\n",stats.triggers);
    printf("#Length[s]:%.1f\n",25E-9*(stats.RunFinish-stats.RunStart));
-   printf("#AvgROCLength[s]:%.2f\n",25E-6*(stats.OnTime)/ (stats.ROCs));
+   printf("#AvgROCLength[ms]:%.2f\n",25E-6*(stats.OnTime)/ (stats.ROCs));
    printf("#ontime[s]:%.1f\n",25E-9*(stats.OnTime));
    printf("#ontime[%%]:%.1f\n",100.0 * (stats.OnTime) / (stats.RunFinish-stats.RunStart) );
    printf("#Triggers/s:%.2f\n",stats.triggers/(25E-9*(stats.RunFinish-stats.RunStart)));
