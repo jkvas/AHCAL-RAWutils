@@ -80,7 +80,7 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#BXID_length=%d\n", arguments->bxid_length);
    printf("#trig_data_from_spiroc_raw=%d\n", arguments->trig_data_from_spiroc_raw);
    printf("#aftertrigger_veto=%d\n", arguments->aftertrigger_veto);
-   printf("#report_gaps_ms=%d\n", arguments->aftertrigger_veto);
+   printf("#report_gaps_ms=%d\n", arguments->report_gaps_ms);
 //   printf("#print_bif_start_phases=%d\n", arguments->aftertrigger_veto);
    printf("#print_triggers=%d\n",arguments->print_triggers);
    printf("#print_cycles=%d\n",arguments->print_cycles);
