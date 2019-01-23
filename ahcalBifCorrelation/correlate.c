@@ -1220,7 +1220,16 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
          printf("#wrong header length: %d", headlen & 0xffff);
          continue;
       }
-      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 2);
+      int lda_port = (headinfo >> 8) & 0xFF;
+      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+         continue;
+      }
+      if (lda_port >= C_MAX_PORTS) {
+         printf("#ERROR: wrong LDA port: %d\n", lda_port);
+         continue;         //wrong port number
+      }
+      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
       /* roc_prev = ROcycle; */
       /* if (((headlen >> 16) & 0xFF) != roc_prev) { */
       /*          roc_prev = ((headlen >> 16) & 0xFF); */
@@ -1235,20 +1244,23 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
          printf("#unable to read the complete packet / EOF\n");
          break;
       }
+      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
 //       printf("no spiroc data packet!\n");
          continue;
       }
+      unsigned int dif_id=((unsigned int)buf[6]) | (((unsigned int)buf[7])<<8);
+      if ((arguments->module>=0) && (arguments->module != dif_id)) continue;
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
       int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
 //    printf("#memory cells: %d\n", memcell_filled);
       int first_bif_iterator = get_first_iterator2(arguments, bif_data, ROcycle);
       for (memcell = arguments->minimum_memcell; memcell < memcell_filled; ++memcell) {
+	 if (memcell > arguments->maximum_memcell) continue;
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
          bxid = grayRecode(bxid);
-         if (memcell > arguments->maximum_memcell) continue;
          for (channel = 0; channel < 36; ++channel) {
             if ((arguments->channel != -1) && (channel != arguments->channel)) continue; /*ship data from unwanted channel*/
 
