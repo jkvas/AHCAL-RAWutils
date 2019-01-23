@@ -1297,15 +1297,17 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
                   bif_bxid = (bif_data[bif_iterator].tdc - 0) / arguments->bxid_length;
                   if ((bif_bxid + ext_search) > (bxid + 1 + max_correlation / arguments->bxid_length)) break; /*we jumped to another bxid with the bif_iterator*/
                   if ((bif_bxid + ext_search) < bxid) continue;
-                  int shift = 0;
+                  /* int shift = 0; */
                   int startindex = arguments->bxid_length * (bif_bxid + ext_search - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
                   int endindex = startindex + arguments->bxid_length;
                   if (startindex < 0) startindex = 0;
                   if (endindex >= max_correlation) endindex = max_correlation;
 //                  printf("start: %d\tend: %d\n", startindex, endindex);
-                  for (shift = startindex; shift < endindex; shift++) {
-                     scan[shift]++;
-                  }
+		  if (startindex<max_correlation) scan[startindex]++;
+		  scan[endindex]--;
+                  /* for (shift = startindex; shift < endindex; shift++) { */
+                  /*    scan[shift]++; */
+                  /* } */
 //                  for (; shift < max_correlation; shift++) {
 //                     bif_bxid = ((int) bif_data[bif_iterator].tdc - shift) / arguments->bxid_length;
 ////                     same_bif_bxid_index = (bif_bxid == previous_bif_bxid) ? same_bif_bxid_index + 1 : 0;
@@ -1323,6 +1325,11 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
 //    printf("\n");
    }
    fclose(fp);
+   int running_sum=0;
+   for (i=0 ; i<max_correlation ; i++){//getting the number of correlations
+      running_sum += scan[i];
+      scan[i]=running_sum;
+   }
    int maxval = -1;
    int maxindex = -1;
    for (i = 0; i < max_correlation; i++) {
