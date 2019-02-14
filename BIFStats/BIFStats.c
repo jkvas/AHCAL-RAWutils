@@ -386,7 +386,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       }
    }
    printf("#--- Statistics ---------------------------------------------\n");
-   printf("RunNr:%d\n",arguments->run_number);
+   printf("#RunNr:%d\n",arguments->run_number);
    printf("#ROCs[count]:%llu\n", (long long unsigned int) stats.ROCs);
    printf("#ROC/s:%.1f\n",((long long unsigned int) (stats.ROCs))/(25E-9*(stats.RunFinish-stats.RunStart)));
    printf("#Triggers[count]:%d\n",stats.triggers);
@@ -547,7 +547,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    
    printf("#finished reading BIF data\n");
    printf("#--- Statistics ---------------------------------------------\n");
-   printf("RunNr:%d\n",arguments->run_number);
+   printf("#RunNr:%d\n",arguments->run_number);
    printf("#ROCs[count]:%llu\n", (long long unsigned int) (shutter_cnt-first_shutter));
    printf("#ROC/s:%.1f\n",((long long unsigned int) (shutter_cnt-first_shutter))/(25E-9*(stats.RunFinish-stats.RunStart)));
    printf("#ROC_without_gaps/s:%.1f\n",((long long unsigned int) (shutter_cnt-first_shutter))/(25E-9*(stats.RunFinish-stats.RunStart-stats.IgnoredGaps)));
