@@ -31,7 +31,7 @@ static struct argp_option options[] =
             { "start_position", 't', "START_POSITION", 0, "Start ROC offset in the BIF data. (=-1 when BIF starts from 0 and AHCAL from 1)" },
             { "correlation_shift", 'r', "RELATIVE_TIMESTAMP", 0, "Correlation timestamp, which synchronizes BXIDs between BIF and SPIROC. Default:13448" },
             { "shift_scan_max", 'n', "SHIFT_SCAN_MAX", 0, "Do the scan for offset values between AHCAL and BIF from 0 to the given maximum. Results are calculated event-wise (every BXID is counted only once for the whole detector). Default:-1, maximum: 2000000" },
-            { "shift_scan_method", 'e', "METHOD_NUMBER", 0, "Selects which method do use for the correlation:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips are counted twice). Fastest.\n2=channel-wise: only specified channel is used. Default:0" },
+            { "shift_scan_method", 'e', "N", 0, "Which method to use for the offset scan:\n0=BXIDs-wise (same BXID from multiple asics are counted only once)\n1=ASIC-wise: each correlated events is summed up individually (same BXID in 2 chips is counted twice). Fastest.\n2=channel-wise: only specified channel is used. Default:0" },
             { "bif_trigger_spacing", 'g', 0, 0, "print the time distance between particles as BXID and timestamp differences. Correct offset should be given" },
             { "minimum_bxid", 257, "MIN_BXID", 0, "BXIDs smaller than MIN_BXID will be ignored. Default:1" },
             { "maximum_bxid", 258, "MAX_BXID", 0, "BXIDs greater than MAX_BXID will be ignored. Default:4095" },
@@ -48,6 +48,7 @@ static struct argp_option options[] =
             { "trigger_input", 259, "NUMBER",0,"use this BIF trigger number. Default:3 (close to RJ45)" },
             { "module", 260, "NUMBER",0,"use only this module number. NOT IMPLEMENTED" },
             { "lda_port", 261, "NUMBER",0,"use only this port number." },
+            { "print_maxoffset", 264, 0, 0, "prints the offset scan maxvalue instead of full scan" },
             { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -84,6 +85,7 @@ struct arguments_t {
    int lda_port;
    int minimum_memcell;
    int maximum_memcell;
+   int print_maxoffset;
 };
 struct arguments_t arguments;
 
@@ -121,6 +123,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->lda_port = -1;
    arguments->minimum_memcell = 0;
    arguments->maximum_memcell = 15;
+   arguments->print_maxoffset = 0;
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -148,14 +151,16 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#Maximum BXID=%d\n", arguments->maximum_bxid);
    printf("#trig_data_from_spiroc_raw=%d\n", arguments->trig_data_from_spiroc_raw);
    printf("#aftertrigger_veto=%d\n", arguments->aftertrigger_veto);
-   printf("#report_gaps_ms=%d\n", arguments->aftertrigger_veto);
-   printf("#print_bif_start_phases=%d\n", arguments->aftertrigger_veto);
+   printf("#report_gaps_ms=%d\n", arguments->report_gaps_ms);
+   printf("#print_bif_start_phases=%d\n", arguments->print_bif_start_phases);
    printf("#realign_bif_starts=%d\n", arguments->realign_bif_starts);
    printf("#Debug_constant=%d\n", arguments->debug_constant);
    printf("#Print_triggers=%d\n", arguments->print_triggers);
    printf("#trigger_input=%d\n", arguments->trigger_input);
    printf("#module=%d\n", arguments->module);
    printf("#lda_port=%d\n", arguments->lda_port);
+   printf("#print_maxoffset=%d\n", arguments->print_maxoffset);
+
 }
 
 /* Parse a single option. */
@@ -212,6 +217,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
          break;
       case 263:
          arguments->maximum_memcell = atoi(arg);
+         break;
+      case 264:
+         arguments->print_maxoffset = 1;
          break;
       case 'k':
          arguments->debug_constant = atoi(arg);
@@ -1339,9 +1347,13 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
       }
    }
    printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
-   printf("#correlation scan\n#shift\thits\tnormalized\n");
-   for (i = 0; i < max_correlation; i++) {
-      printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
+   if (arguments->print_maxoffset){
+      printf("%d\t%d\t%d\t%d\t#ShortScanResult\n",arguments->run_number, arguments->shift_scan_method, maxindex, maxval);
+   } else {
+      printf("#correlation scan\n#shift\thits\tnormalized\n");
+      for (i = 0; i < max_correlation; i++) {
+	 printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
+      }
    }
    return 0;
 }
@@ -1510,9 +1522,13 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
       }
    }
    printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
-   printf("#correlation scan\n#shift\thits\tnormalized\n");
-   for (i = 0; i < max_correlation; i++) {
-      printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
+   if (arguments->print_maxoffset){
+      printf("%d\t%d\t%d\t%d\t#ShortScanResult\n",arguments->run_number, arguments->shift_scan_method, maxindex, maxval);
+   } else {
+      printf("#correlation scan\n#shift\thits\tnormalized\n");
+      for (i = 0; i < max_correlation; i++) {
+	 printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
+      }
    }
    return 0;
 }
@@ -1636,9 +1652,13 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
       }
    }
    printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
-   printf("#correlation scan\n#shift\thits\tnormalized\n");
-   for (i = 0; i < max_correlation; i++) {
-      printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
+   if (arguments->print_maxoffset){
+      printf("%d\t%d\t%d\t%d\t#ShortScanResult\n",arguments->run_number, arguments->shift_scan_method, maxindex, maxval);
+   } else {
+      printf("#correlation scan\n#shift\thits\tnormalized\n");
+      for (i = 0; i < max_correlation; i++) {
+	 printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
+      }
    }
    return 0;
 }
