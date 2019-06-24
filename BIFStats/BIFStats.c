@@ -247,7 +247,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    int within_ROC = 0;
    unsigned char minibuf[8];
    fprintf(stdout, "#ROC\tTrigid\tTS\tinROC\tROCincr\tTSfromStart\tfromLastTS\tphase\t#Trig\n");
-   fprintf(stdout,"#RunNr\nROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\t#cycle\n");
+   fprintf(stdout,"#RunNr\tROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\tphase\t#cycle\n");
    
    while (1) {
       //int i = 0;
