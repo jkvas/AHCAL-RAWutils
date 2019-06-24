@@ -247,7 +247,8 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    int within_ROC = 0;
    unsigned char minibuf[8];
    fprintf(stdout, "#ROC\tTrigid\tTS\tinROC\tROCincr\tTSfromStart\tfromLastTS\tphase\t#Trig\n");
-   fprintf(stdout, "#ROC\tTS\tstart?\tlength\t#cycle\n");
+   fprintf(stdout,"#RunNr\nROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\t#cycle\n");
+   
    while (1) {
       //int i = 0;
       if (fread(minibuf, 1, 1, fp) <= 0) goto file_finished2;
@@ -313,19 +314,27 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
 	    //--end of the fill of start phases
 	    //if (arguments->realign_bif_starts > -100) TS = ((TS + arguments->realign_bif_starts) & (0xFFFFFFFFFFFFFFF8LLU));// - arguments->realign_bif_starts ;
             lastStartTS = TS;
-            if (arguments->print_cycles) {
-               fprintf(stdout,"%d\t",ROC);
-               fprintf(stdout,"%llu\t",TS);
-               fprintf(stdout,"1\tNaN\t#cycle\n");
-            }
+            /* if (arguments->print_cycles) { */
+            /*    fprintf(stdout,"%d\t",ROC); */
+            /*    fprintf(stdout,"%llu\t",TS); */
+            /*    fprintf(stdout,"1\tNaN\t#cycle\n"); */
+            /* } */
          }
          if (type == 0x02) {//stop acq
             if (arguments->print_cycles) {
+	       //fprintf(stdout,"#ROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\t#cycle");
+	       fprintf(stdout,"%d\t",arguments->run_number);
                fprintf(stdout,"%d\t",ROC);
-               fprintf(stdout,"%llu\t",TS);
-               fprintf(stdout,"0\t");
-               fprintf(stdout,"%llu\t",TS - lastStartTS);
-               fprintf(stdout,"#cycle\n",TS);
+	       fprintf(stdout,"%llu\t",(long long unsigned int)lastStartTS);
+               fprintf(stdout,"%llu\t",(long long unsigned int)TS);
+               fprintf(stdout,"%llu\t",(long long unsigned int)(TS - lastStartTS));
+	       u_int64_t gap=lastStartTS-lastStopTS;
+	       if (gap < 2400000000ULL)
+		  fprintf(stdout,"%llu\t",(long long unsigned int)gap);
+	       else
+		  fprintf(stdout,"NaN\t");
+	       fprintf(stdout, "%d\t",(int) rocphases[ROC]);
+               fprintf(stdout,"#cycle\n");
             }
             within_ROC = 0;
 	    stats.OnTime += TS - lastStartTS;
@@ -357,11 +366,11 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       if (arguments->print_triggers){
          fprintf(stdout, "%05d\t", ROC);
          fprintf(stdout, "%05d\t", trigid);
-         fprintf(stdout, "%llu\t", TS);
+         fprintf(stdout, "%llu\t", (long long unsigned int) TS);
          fprintf(stdout, "%d\t", within_ROC);
          fprintf(stdout, "%d\t", increment);
-         fprintf(stdout, "%lli\t", TS - lastStartTS);
-         fprintf(stdout, "%lli\t", TS - lastTS);
+         fprintf(stdout, "%lli\t", (long long unsigned int) (TS - lastStartTS));
+         fprintf(stdout, "%lli\t", (long long unsigned int) (TS - lastTS));
          fprintf(stdout, "%d\t",(int) rocphases[ROC]);
          fprintf(stdout, "#Trig\n");
       }
@@ -474,11 +483,11 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
             if (arguments->print_triggers){
                fprintf(stdout,"%d\t",shutter_cnt - first_shutter + arguments->roc_offset);
                fprintf(stdout,"%d\t",trig_counter - first_trigger + arguments->trig_num_offset);
-               fprintf(stdout,"%llu\t",finetime_trig>>5);
+               fprintf(stdout,"%llu\t",(long long unsigned int) (finetime_trig>>5));
                fprintf(stdout,"1\t");//in Bif it is inside acquisition by definition
                fprintf(stdout,"NaN\t");//no information about the ROC in the packet
-               fprintf(stdout,"%llu\t",(finetime_trig>>5)-oldtime_fcmd);
-               fprintf(stdout,"%llu\t",(finetime_trig-last_accepted_trigger_TS)>>5);
+               fprintf(stdout,"%llu\t",(long long unsigned int) ((finetime_trig>>5)-oldtime_fcmd));
+               fprintf(stdout,"%llu\t",(long long unsigned int) ((finetime_trig-last_accepted_trigger_TS)>>5));
                fprintf(stdout,"#Trig\n");
             }
 	    last_accepted_trigger_TS = finetime_trig;
