@@ -25,6 +25,7 @@ const struct option long_opts[] = {
       { "dummy_triggers", required_argument, nullptr, 'd' },
       { "debug", no_argument, nullptr, 'b' },
       { "help", no_argument, nullptr, 'h' },
+	  { "print_hit_multiplicity", no_argument, nullptr, 't' },
       { nullptr, 0, nullptr, 0 }
 };
 
@@ -38,6 +39,7 @@ struct arguments_t {
       int max_rocs;
       int dummy_triggers;
       bool debug;
+      bool print_hit_multiplicity;
 };
 
 struct arguments_t arguments;
@@ -52,6 +54,7 @@ void argumentsInit(struct arguments_t & arguments) {
    arguments.max_rocs = 0;
    arguments.dummy_triggers = 0;
    arguments.debug = false;
+   arguments.print_hit_multiplicity=false;
 }
 
 void argumentsPrint(const struct arguments_t & arguments) {
@@ -64,6 +67,7 @@ void argumentsPrint(const struct arguments_t & arguments) {
    std::cout << "#max_rocs=" << arguments.max_rocs << std::endl;
    std::cout << "#dummy_triggers=" << arguments.dummy_triggers << std::endl;
    std::cout << "#debug=" << arguments.debug << std::endl;
+   std::cout << "#print_hit_multiplicity=" << arguments.print_hit_multiplicity << std::endl;
 }
 
 void PrintHelp() {
@@ -116,6 +120,9 @@ void ProcessArgs(int argc, char** argv) {
          case 'b':
             arguments.debug = true;
             break;
+         case 't':
+        	 arguments.print_hit_multiplicity = true;
+        	 break;
          case 'h': // -h or --help
          case '?': // Unrecognized option
          default:
@@ -300,6 +307,7 @@ int analyze_noise(const struct arguments_t & arguments) {
    std::map<uint32_t, int> hitsAfterAdcCut; //maps LDA.Port.Chip.Channel to number of hits without bxid0 after the ADC cut
    std::map<uint32_t, std::map<uint16_t, bool>> ROCtriggers; // map of map of triggers on ROC
    std::map<uint32_t, uint64_t> ADCsum; //maps LDA.Port.Chip.Channel to the ADC summary
+   std::map<uint64_t,uint8_t> HitMultiplicity; //how many hits in ROC(47..16).bxid(15..0)
 
    prefetch_information(arguments, ROCtriggers, startTSs, stopTSs, busyTSs, memcells);
 
@@ -509,6 +517,9 @@ int analyze_noise(const struct arguments_t & arguments) {
             if (adc_hit) {
                hits[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
                ADCsum[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))] += adc;
+               uint64_t MultiplicityIndex = (((uint64_t) ROcycle)<<32) | (uint64_t)bxid;
+			   HitMultiplicity[MultiplicityIndex]++;
+			   if (HitMultiplicity[MultiplicityIndex]==0) HitMultiplicity[MultiplicityIndex]=255;
                if (adc_gain && (adc > getMipCut(0.5, lda, port, asic, channel, memcell))) {
                   hitsAfterAdcCut[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
                }
@@ -558,6 +569,27 @@ int analyze_noise(const struct arguments_t & arguments) {
 //            << "  chip=" << (it.first & 0xFF) << "  len=";
 //      printf("%12f", it.second);
 //      std::cout << std::endl;
+   }
+   if (arguments.print_hit_multiplicity){
+	   int MultiplicityHist[256];
+	   for (int i = 0; i < 256; ++i) {
+           MultiplicityHist[i] = 0;
+	   }
+	   for (const auto &it:HitMultiplicity) {
+	   	   MultiplicityHist[it.second]++;
+	   }
+	   int NofCHannels=0;
+	   for (const auto &it:hits) NofCHannels++;
+	   std::cout << "#---------------------------------------------------------------" << std::endl;
+	   std::cout << "#hits\tcount\ttotal_lenth[s]\tchannels_tot\t#multiplicity" << std::endl;
+	   for (int i = 0; i < 256; ++i) {
+		   std::cout << i << "\t" ;
+		   std::cout << MultiplicityHist[i] << "\t" ;
+		   printf("%f\t", globalLength);
+		   std::cout << NofCHannels << "\t" ;
+		   std::cout << "#multiplicity" << std::endl;
+	   }
+
    }
 //   for (const auto &it : hits) {
 //      std::cout << "#Hits LDA=" << ((it.first >> 24) & 0xFF)
