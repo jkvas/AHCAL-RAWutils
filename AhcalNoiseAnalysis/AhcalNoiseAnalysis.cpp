@@ -519,7 +519,7 @@ int analyze_noise(const struct arguments_t & arguments) {
                ADCsum[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))] += adc;
                uint64_t MultiplicityIndex = (((uint64_t) ROcycle)<<32) | (uint64_t)bxid;
 			   HitMultiplicity[MultiplicityIndex]++;
-			   if (HitMultiplicity[MultiplicityIndex]==0) HitMultiplicity[MultiplicityIndex]=255;
+			   if (HitMultiplicity[MultiplicityIndex]==0) HitMultiplicity[MultiplicityIndex]--; //prevent overflows
                if (adc_gain && (adc > getMipCut(0.5, lda, port, asic, channel, memcell))) {
                   hitsAfterAdcCut[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
                }
