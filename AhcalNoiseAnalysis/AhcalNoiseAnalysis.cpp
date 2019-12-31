@@ -13,7 +13,7 @@
 
 using namespace std;
 
-const char* const short_opts = "w:vrluhmd";
+const char* const short_opts = "w:vrluhmdt";
 const struct option long_opts[] = {
       { "spiroc_raw_filename", required_argument, nullptr, 'w' },
       { "reject_validated", no_argument, nullptr, 'v' },
@@ -82,6 +82,7 @@ void PrintHelp() {
    std::cout << "   -c, --adc_cut" << std::endl;
    std::cout << "   -d, --dummy_triggers" << std::endl;
    std::cout << "   -h, --help" << std::endl;
+   std::cout << "   -t, --print_hit_multiplicity" << std::endl;
    exit(1);
 }
 
@@ -581,13 +582,20 @@ int analyze_noise(const struct arguments_t & arguments) {
 	   int NofCHannels=0;
 	   for (const auto &it:hits) NofCHannels++;
 	   std::cout << "#---------------------------------------------------------------" << std::endl;
-	   std::cout << "#hits\tcount\ttotal_lenth[s]\tchannels_tot\t#multiplicity" << std::endl;
+	   std::cout << "#hits\tcount\tmultiplicity_weighted\ttotal_lenth[s]\tchannels_tot\thits_tot#multiplicity" << std::endl;
+	   int totalHits=0;
+	   for (int i = 0; i < 256; ++i) {
+		   totalHits += MultiplicityHist[i] * i;//calculate total number of hits from all multiplicities
+	   }
 	   for (int i = 0; i < 256; ++i) {
 		   std::cout << i << "\t" ;
 		   std::cout << MultiplicityHist[i] << "\t" ;
+		   std::cout << MultiplicityHist[i]*i << "\t" ;
 		   printf("%f\t", globalLength);
 		   std::cout << NofCHannels << "\t" ;
+		   std::cout << totalHits << "\t";
 		   std::cout << "#multiplicity" << std::endl;
+		   totalHits -= MultiplicityHist[i] * i;
 	   }
 
    }
