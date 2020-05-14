@@ -344,7 +344,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
          //         fseek(fp, 8, SEEK_CUR);
          continue;
-      }
+      } //type != 0x10 (trigger)
 
       //      printf(".\n");
 
