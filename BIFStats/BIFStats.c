@@ -29,7 +29,7 @@ static struct argp_option options[] =
 //   { "realign_bif_starts", 'z', "CLOCK_PHASE", 0, "Realign the clock phase in the BIF data to desired phase (0..7)" },
 //   { "print_bif_start_phases", 'p', 0, 0, "simply print histogram of last 3 bits of the start acquisition commands seen by BIF" },
    { "print_triggers", 257, 0, 0, "print trigger entries" },
-   { "print_cycles", 258, 0, 0, "print readout cycle informationtrigger entries" },
+   { "print_cycles", 258, 0, 0, "print readout cycle information" },
    { "roc_offset", 259, "OFFSET", 0, "readout cycle number adjustment" },
    { "trig_num_offset", 260, "OFFSET", 0, "Trigger number adjustemnt" },
    { "ignored_gaps_ms", 'g', "MS", 0, "Do not include into statistics gaps longed than MS milisecond s. Default=5000 ms" },
@@ -481,7 +481,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
                bif_data[bif_data_index++].trig_count = trig_counter;
             }
             if (arguments->print_triggers){
-               fprintf(stdout,"%d\t",shutter_cnt - first_shutter + arguments->roc_offset);
+               fprintf(stdout,"%ld\t",shutter_cnt - first_shutter + arguments->roc_offset);
                fprintf(stdout,"%d\t",trig_counter - first_trigger + arguments->trig_num_offset);
                fprintf(stdout,"%llu\t",(long long unsigned int) (finetime_trig>>5));
                fprintf(stdout,"1\t");//in Bif it is inside acquisition by definition
@@ -638,7 +638,7 @@ int main(int argc, char **argv) {
 //	        arguments.output_file,
 //	        arguments.verbose ? "yes" : "no",
 //	        arguments.silent ? "yes" : "no");
-final:
+/* final: */
    free(bif_data);
    free(bif_start_phases);
    free(rocphases);
