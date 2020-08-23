@@ -401,6 +401,8 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
 
    int within_ROC = 0;
    unsigned char minibuf[8];
+   int oldtrigid = 0;
+   
    while (1) {
       //int i = 0;
       if (fread(minibuf, 1, 1, fp) <= 0) goto file_finished2;
@@ -513,7 +515,16 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
                  (long long int) (((long long int) TS - (long long int) lastStartTS) - (long long int) arguments->correlation_shift) / arguments->bxid_length);
          fprintf(stdout, "%lli\t",
                (long long int) (((long long int) TS - (long long int) lastStartTS) - (long long int) arguments->correlation_shift) % arguments->bxid_length);
-         fprintf(stdout, "#Trig \n");
+         if (trigid < oldtrigid){
+            if ( ( (trigid+65536) - oldtrigid) > 5) {
+               fprintf(stdout, "#Trig #sequence error from %d\n",oldtrigid);
+            } else {
+               fprintf(stdout, "#Trig\n");
+            }
+         } else {
+            fprintf(stdout, "#Trig\n");
+         }
+         oldtrigid = trigid;
       }
       lastTS = TS;
 
