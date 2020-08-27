@@ -26,6 +26,7 @@ static struct argp_option options[] =
    { "bxid_length", 'l', "LENGTH", 0, "length of the BXID in BIF tics (to convert from ns: multiply by 1.28)" },
    { "aftertrigger_veto", 'v', "VETO_LENGTH", 0, "Period in ns after the last trigger, where another triggers are vetoed. Useful to filter glitches on trigger line" },
    { "report_gaps_ms", 'q', "LENGTH_MS", 0, "Report readout cycles, that have larger gaps before start (to detect temperature readouts and starts)" },
+   { "report_trigid_skips", 's', "DIFF", 0, "Report trigger numbers, that differ from previous too much" },
 //   { "realign_bif_starts", 'z', "CLOCK_PHASE", 0, "Realign the clock phase in the BIF data to desired phase (0..7)" },
 //   { "print_bif_start_phases", 'p', 0, 0, "simply print histogram of last 3 bits of the start acquisition commands seen by BIF" },
    { "print_triggers", 257, 0, 0, "print trigger entries" },
@@ -45,6 +46,7 @@ struct arguments_t {
    int bxid_length;
    int aftertrigger_veto;
    int report_gaps_ms;
+   int report_trigid_skips;
    int print_triggers;
    int print_cycles;
    int run_number;
@@ -64,6 +66,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->bxid_length = 5120;
    arguments->aftertrigger_veto = 0;
    arguments->report_gaps_ms = 500;
+   arguments->report_trigid_skips = 2;
    arguments->run_number = 0;
    arguments->print_triggers = 0;
    arguments->print_cycles = 0;
@@ -81,6 +84,7 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#trig_data_from_spiroc_raw=%d\n", arguments->trig_data_from_spiroc_raw);
    printf("#aftertrigger_veto=%d\n", arguments->aftertrigger_veto);
    printf("#report_gaps_ms=%d\n", arguments->report_gaps_ms);
+   printf("#report_trigid_skips=%d\n",arguments->report_trigid_skips);
 //   printf("#print_bif_start_phases=%d\n", arguments->aftertrigger_veto);
    printf("#print_triggers=%d\n",arguments->print_triggers);
    printf("#print_cycles=%d\n",arguments->print_cycles);
@@ -116,6 +120,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       break;
    case 'r':
       arguments->correlation_shift = atoi(arg);
+      break;
+   case 's':
+      arguments->report_trigid_skips = atoi(arg);
       break;
    case 'v':
       arguments->aftertrigger_veto = atoi(arg);
@@ -243,11 +250,12 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    u_int64_t TS, lastTS = 0;
    u_int64_t lastStartTS = 0;
    u_int64_t lastStopTS = 0;
+   int lastTrigID = 0;   
 
    int within_ROC = 0;
    unsigned char minibuf[8];
-   fprintf(stdout, "#ROC\tTrigid\tTS\tinROC\tROCincr\tTSfromStart\tfromLastTS\tphase\t#Trig\n");
-   fprintf(stdout,"#RunNr\tROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\tphase\t#cycle\n");
+   if (arguments->print_triggers) fprintf(stdout, "#ROC\tTrigid\tTS\tinROC\tROCincr\tTSfromStart\tfromLastTS\tphase\t#Trig\n");
+   if (arguments->print_cycles) fprintf(stdout,"#RunNr\tROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\tphase\t#cycle\n");
    
    while (1) {
       //int i = 0;
@@ -283,7 +291,14 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       int type = minibuf[4];
 
       int trigid = ((int) minibuf[6]) + (((int) minibuf[7]) << 8); //possible trigid
-
+      if (arguments->report_trigid_skips > 0) {
+         if ( (trigid < lastTrigID) && ((trigid + 65536 - lastTrigID) > arguments->report_trigid_skips)){
+            fprintf(stdout,"#triggerID sequence error(backwards). Previous: %d, new %d(%d). ROC=%d\n",lastTrigID,trigid,trigid+65536,ROC);
+         }
+         if ( (trigid - lastTrigID) > arguments->report_trigid_skips){
+            fprintf(stdout,"#triggerID sequence error(forward). Previous: %d, new %d(%d). ROC=%d\n",lastTrigID,trigid,trigid+65536,ROC);
+         }
+      }
       //-------------------------------------------------------------
       // now read the Timestamp
       if (fread(minibuf, sizeof(minibuf), 1, fp) <= 0) goto file_finished2;
@@ -441,7 +456,9 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    }
    u_int32_t time_h = 0, time_l = 0; /*timestamp MSB part and LSB part*/
    u_int64_t time = 0; /*merged timestamp*/
-   u_int64_t oldtime_fcmd = 0;
+   //u_int64_t oldtime_fcmd = 0;
+   u_int64_t lastStartTS = 0;
+   u_int64_t lastStopTS = 0;
    u_int64_t finetime_trig = 0;
    u_int16_t details = 0; /*part of the packet*/
    u_int16_t details_last = 0;
@@ -453,6 +470,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
    u_int64_t last_accepted_trigger_TS = 0LLU;
    unsigned char minibuf[8];
    if (arguments->print_triggers) fprintf(stdout,"ROC\ttirg#\tTS\tinside\trocDiff\tfrom_start\tfrom_previous\t#Trig\n");
+   if (arguments->print_cycles) fprintf(stdout,"#RunNr\tROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\tphase\t#cycle\n");
    while (1) {
       if (fread(minibuf, sizeof(minibuf), 1, fp) <= 0) /*read first 8 bytes*/
       goto file_finished;
@@ -477,7 +495,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
 	    stats.triggers++;
             if ((bif_data_index < C_MAX_BIF_EVENTS)) {/*if the data index is in range*/
                bif_data[bif_data_index].ro_cycle = shutter_cnt; // - first_shutter;
-               bif_data[bif_data_index].tdc = finetime_trig - (oldtime_fcmd << 5);
+               bif_data[bif_data_index].tdc = finetime_trig - (lastStartTS << 5);
                bif_data[bif_data_index++].trig_count = trig_counter;
             }
             if (arguments->print_triggers){
@@ -486,7 +504,7 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
                fprintf(stdout,"%llu\t",(long long unsigned int) (finetime_trig>>5));
                fprintf(stdout,"1\t");//in Bif it is inside acquisition by definition
                fprintf(stdout,"NaN\t");//no information about the ROC in the packet
-               fprintf(stdout,"%llu\t",(long long unsigned int) ((finetime_trig>>5)-oldtime_fcmd));
+               fprintf(stdout,"%llu\t",(long long unsigned int) ((finetime_trig>>5)-lastStartTS));
                fprintf(stdout,"%llu\t",(long long unsigned int) ((finetime_trig-last_accepted_trigger_TS)>>5));
                fprintf(stdout,"#Trig\n");
             }
@@ -494,15 +512,30 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
             break;
          case 2:
             //stop acquisition
-	    stats.OnTime += (time-oldtime_fcmd);
+	    stats.OnTime += (time-lastStartTS);
 	    stats.RunFinish = time;
-            oldtime_fcmd = time;
+            if (arguments->print_cycles){
+               fprintf(stdout, "%d\t",arguments->run_number);
+               fprintf(stdout, "%llu\t", (long long unsigned int) (shutter_cnt-first_shutter));
+               fprintf(stdout, "%llu\t", (long long unsigned int) lastStartTS);//start
+               fprintf(stdout, "%llu\t", (long long unsigned int) time);//stop
+               fprintf(stdout, "%llu\t", (long long unsigned int) time-lastStartTS);//length
+               u_int64_t gap = lastStartTS-lastStopTS;
+               if (gap < 2400000000ULL)
+		  fprintf(stdout, "%llu\t", (long long unsigned int)gap);
+	       else
+		  fprintf(stdout, "NaN\t");
+               fprintf(stdout, "%d\t", (u_int32_t) lastStartTS & (C_START_PHASES_LENGTH - 1));
+               fprintf(stdout,"#cycle\n");
+            }
+            lastStopTS = time;
 	    break;
          case 3:
+            //start acquisition
 	    stats.ROCs++;
             //"details" variable is treated as shutter_counter (12 bit)
             if ((details_last == 4095) && (details == 0)) {
-               /*when the shutter counter overflows, we have to increment the shutter counter properlyew*/
+               /*when the shutter counter overflows, we have to increment the shutter counter properly*/
                shutter_cnt += 4096;
             }
             /*use the lower 12 bits from the BIF data directly*/
@@ -514,24 +547,23 @@ int load_bif_data(struct arguments_t * arguments, BIF_record_t * bif_data, int *
                fprintf(stdout, "#First start acq cycle: %llu\n", (long long unsigned int) shutter_cnt);
                //if (arguments->start_position < 0) arguments->start_position = shutter_cnt;
             }
-            //start acquisition
 //				printf("%llu\t%llu\t%llu\t#start acq\n", time, time - oldtime_fcmd, shutter_cnt);
 	    //if (arguments->realign_bif_starts > -100) time = ((time + arguments->realign_bif_starts) & (0xFFFFFFFFFFFFFFF8LLU));// - arguments->realign_bif_starts ;
-            if (oldtime_fcmd) {
-               if ((time - oldtime_fcmd) > (40000LLU * arguments->report_gaps_ms)) {
+            if (lastStartTS) {
+               if ((time - lastStartTS) > (40000LLU * arguments->report_gaps_ms)) {
                   fprintf(stdout, "#Long gap before start: raw=%llu,\tFrom0=%llu,\ttime_s=%f\n", 
                           (long long unsigned int) shutter_cnt, 
                           (long long unsigned int) (shutter_cnt-first_shutter), 
-                          (25.0E-9)*(time - oldtime_fcmd));
+                          (25.0E-9)*(time - lastStartTS));
                }
-               if ((time - oldtime_fcmd) > (40000LLU * arguments->ignored_gaps_ms)) {
-                  stats.IgnoredGaps += (time - oldtime_fcmd);
+               if ((time - lastStartTS) > (40000LLU * arguments->ignored_gaps_ms)) {
+                  stats.IgnoredGaps += (time - lastStopTS);
                }
             }
 	    u_int32_t bif_start_phase = ((u_int32_t)time)&(C_START_PHASES_LENGTH - 1);
 	    //printf("%d\t%d\t#Phase\n", bif_start_phase, (u_int32_t)shutter_cnt);//DEBUG
 	    if (bif_start_phase<C_START_PHASES_LENGTH) bif_start_phases[bif_start_phase]++;
-            oldtime_fcmd = time;
+            lastStartTS = time;
             break;
          default:
             fprintf(stderr, "unknown BIF packet\n");
