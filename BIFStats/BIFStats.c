@@ -291,14 +291,6 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       int type = minibuf[4];
 
       int trigid = ((int) minibuf[6]) + (((int) minibuf[7]) << 8); //possible trigid
-      if (arguments->report_trigid_skips > 0) {
-         if ( (trigid < lastTrigID) && ((trigid + 65536 - lastTrigID) > arguments->report_trigid_skips)){
-            fprintf(stdout,"#triggerID sequence error(backwards). Previous: %d, new %d(%d). ROC=%d\n",lastTrigID,trigid,trigid+65536,ROC);
-         }
-         if ( (trigid - lastTrigID) > arguments->report_trigid_skips){
-            fprintf(stdout,"#triggerID sequence error(forward). Previous: %d, new %d(%d). ROC=%d\n",lastTrigID,trigid,trigid+65536,ROC);
-         }
-      }
       //-------------------------------------------------------------
       // now read the Timestamp
       if (fread(minibuf, sizeof(minibuf), 1, fp) <= 0) goto file_finished2;
@@ -362,6 +354,15 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       } //type != 0x10 (trigger)
 
       //      printf(".\n");
+      if (arguments->report_trigid_skips > 0) {
+         if ( (trigid < lastTrigID) && ((trigid + 65536 - lastTrigID) > arguments->report_trigid_skips)){
+            fprintf(stdout,"#triggerID sequence error(backwards). Skipped=%d\tPrevious: %d, new %d(%d). ROC=%d\n",lastTrigID-trigid+1,lastTrigID,trigid,trigid+65536,ROC);
+         }
+         if ( (trigid - lastTrigID) > arguments->report_trigid_skips){
+            fprintf(stdout,"#triggerID sequence error(forward).   Skipped=%d\tPrevious: %d, new %d(%d). ROC=%d\n",lastTrigID-trigid+1,lastTrigID,trigid,trigid+65536,ROC);
+         }
+      }
+      lastTrigID = trigid;
 
       int increment = (newROC - ROC) & 0xFF;
       if (increment > 50) {
