@@ -356,10 +356,10 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       //      printf(".\n");
       if (arguments->report_trigid_skips > 0) {
          if ( (trigid < lastTrigID) && ((trigid + 65536 - lastTrigID) > arguments->report_trigid_skips)){
-            fprintf(stdout,"#triggerID sequence error(backwards). Skipped=%d\tPrevious: %d, new %d(%d). ROC=%d\n",lastTrigID-trigid+1,lastTrigID,trigid,trigid+65536,ROC);
+            fprintf(stdout,"#triggerID sequence error(backwards). Skipped=%d\tPrevious: %d, new %d(%d). ROC=%d, Run=%d\n",trigid-lastTrigID-1,lastTrigID,trigid,trigid+65536,ROC, arguments->run_number);
          }
          if ( (trigid - lastTrigID) > arguments->report_trigid_skips){
-            fprintf(stdout,"#triggerID sequence error(forward).   Skipped=%d\tPrevious: %d, new %d(%d). ROC=%d\n",lastTrigID-trigid+1,lastTrigID,trigid,trigid+65536,ROC);
+            fprintf(stdout,"#triggerID sequence error(forward).   Skipped=%d\tPrevious: %d, new %d(%d). ROC=%d, Run=%d\n",trigid-lastTrigID-1,lastTrigID,trigid,trigid+65536,ROC, arguments->run_number);
          }
       }
       lastTrigID = trigid;
@@ -637,10 +637,10 @@ unsigned char buf[4096];
 
 void print_bif_phases(){
    int i=0;
-   printf("#phase\tcounts\n");
    for (;i<C_START_PHASES_LENGTH; i++){
-      printf("%d\t%d\n", i, bif_start_phases[i]);
+      printf("%d\t", bif_start_phases[i]);
    };
+   printf("#Phases[0-7]\n");
 }
 
 int main(int argc, char **argv) {
@@ -662,7 +662,7 @@ int main(int argc, char **argv) {
    } else {
       load_bif_data(&arguments, bif_data, &bif_last_record);
    }
-   
+   printf("%d\t",arguments.run_number);
    print_bif_phases();
 
 //	printf("ARG1 = %s\nARG2 = %s\nOUTPUT_FILE = %s\n"
