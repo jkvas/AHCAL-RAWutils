@@ -49,6 +49,8 @@ static struct argp_option options[] =
             { "module", 260, "NUMBER",0,"use only this module number. NOT IMPLEMENTED" },
             { "lda_port", 261, "NUMBER",0,"use only this port number." },
             { "print_maxoffset", 264, 0, 0, "prints the offset scan maxvalue instead of full scan" },
+			{ "add_trigger_numbers", 265, 0, 0, "adds run_number and trigger_number to the data" },
+			//			{ "module_positions", 266, "NUMBER", 0, "calculates position within module. 1=1HBU, 2=2x2HBUs" },
             { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -86,6 +88,8 @@ struct arguments_t {
    int minimum_memcell;
    int maximum_memcell;
    int print_maxoffset;
+   int add_trigger_numbers;
+   /* int module_positions; */
 };
 struct arguments_t arguments;
 
@@ -124,6 +128,8 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->minimum_memcell = 0;
    arguments->maximum_memcell = 15;
    arguments->print_maxoffset = 0;
+   arguments->add_trigger_numbers = 0;
+   /* arguments->module_positions = 0; */
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -160,7 +166,8 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#module=%d\n", arguments->module);
    printf("#lda_port=%d\n", arguments->lda_port);
    printf("#print_maxoffset=%d\n", arguments->print_maxoffset);
-
+   printf("#add_trigger_numbers=%d\n", arguments->add_trigger_numbers);
+   /* printf("#module_positions=%d\n", arguments->module_positions); */
 }
 
 /* Parse a single option. */
@@ -221,6 +228,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       case 264:
          arguments->print_maxoffset = 1;
          break;
+      case 265:
+         arguments->add_trigger_numbers = 1;
+         break;
+      /* case 266: */
+      /* 	 arguments->module_positions = atoi(arg); */
+      /* 	 break; */
       case 'k':
          arguments->debug_constant = atoi(arg);
          break;
@@ -380,7 +393,10 @@ u_int16_t grayRecode(const u_int16_t partiallyDecoded) {
 int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t * bif_data, int * bif_last_record) {
    printf("#start reading BIF data from AHCAL raw data\n");
    if ( (arguments->print_triggers)) {
-      fprintf(stdout, "#ROC\tTrigid\tTS\tinside_ROC\tROC_increment\tfrom_start\tfrom_last\tbxid\ttime_within_bxid\t#Trig\n");
+      if (arguments->add_trigger_numbers)
+         fprintf(stdout, "#Run\tROC\tTrigid\tTS\tinside_ROC\tROC_increment\tfrom_start\tfrom_last\tbxid\ttime_within_bxid\t#Trig\n");
+      else
+         fprintf(stdout, "#ROC\tTrigid\tTS\tinside_ROC\tROC_increment\tfrom_start\tfrom_last\tbxid\ttime_within_bxid\t#Trig\n");
    }
    int bif_data_index = 0;
    int i;
@@ -504,6 +520,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          bif_data[bif_data_index++].trig_count = trigid;
       }
       if ( (arguments->print_triggers)) {
+         if (arguments->add_trigger_numbers) fprintf(stdout, "%05d\t", arguments->run_number);
          fprintf(stdout, "%05d\t", ROC);
          fprintf(stdout, "%05d\t", trigid);
          fprintf(stdout, "%llu\t", (long long unsigned int) TS);
@@ -531,6 +548,18 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    }
    file_finished2:
    *bif_last_record = bif_data_index;
+   oldtrigid=0;
+   int trigit=0;
+   for (trigit = 0; trigit < bif_data_index; trigit++) {
+	   int updatedTrigID=update_counter_modulo(oldtrigid, bif_data[trigit].trig_count, 65536, 32768);
+	   if (oldtrigid >= updatedTrigID) {
+		   printf("#ERROR in trigger sequence. Old_trig = %d, new_trig = %d\n",oldtrigid,updatedTrigID);
+	   }
+	   if ( (updatedTrigID - oldtrigid) >2 )
+		   printf("#ERROR skipped trigger. Old_trig = %d, new_trig = %d\tskip = %d\n",oldtrigid,updatedTrigID,(updatedTrigID - oldtrigid) );
+	   oldtrigid = updatedTrigID;
+	   bif_data[trigit].trig_count = updatedTrigID;
+   }
    if (fp != NULL) {
       if (fclose(fp)) {
          perror("Unable to close the file\n");
@@ -928,7 +957,9 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
    }
    printf("# bxid(BIF-DIF): -1 means, that DIF bxid is higher than it should be.\n");
    printf("#1\t2\t3\t4\t5\t6\t7\t8\t9\t10\t11\t12\t13\t14\t15\t16\t17\t18\t19\t20\n");
-   printf("#ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tintra_bxid_event\tROCLen\tmem_filled\n");
+   printf("#");
+   if (arguments->add_trigger_numbers) printf("RunNr\tTrigID\t");
+   printf("ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tintra_bxid_event\tROCLen\tmem_filled\n");
 
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
@@ -1051,6 +1082,10 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
                   /************************************************/
                   /* here we have correlated candidate in memory  */
                   /************************************************/
+                  if (arguments->add_trigger_numbers) {
+                     printf("%d\t",arguments->run_number);
+                     printf("%d\t",bif_data[bif_iterator].trig_count);
+                  }
                   printf("%d\t", ROcycle);
                   printf("%d\t", bxid);
                   printf("%d\t", asic);
