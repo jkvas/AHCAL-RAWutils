@@ -414,7 +414,8 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    u_int64_t TS, lastTS = 0;
    u_int64_t lastStartTS = 0;
    u_int64_t lastStopTS = 0;
-
+   u_int64_t bytePos = 0;
+   
    int within_ROC = 0;
    unsigned char minibuf[8];
    int oldtrigid = 0;
@@ -441,6 +442,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       //      printf("new ROC %d\n", newROC);
       //-----------------------------------------------------------
       // now read the TIME header + type + trigID
+      bytePos = ftell(fp);
       if (fread(minibuf, sizeof(minibuf), 1, fp) <= 0) goto file_finished2;
       if ((minibuf[0] != 0x45) || (minibuf[1] != 0x4D) || (minibuf[2] != 0x49) || (minibuf[3] != 0x54)) {
          fseek(fp, 8, SEEK_CUR);
@@ -522,7 +524,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
       if ( (arguments->print_triggers)) {
          if (arguments->add_trigger_numbers) fprintf(stdout, "%05d\t", arguments->run_number);
          fprintf(stdout, "%05d\t", ROC);
-         fprintf(stdout, "%05d\t", trigid);
+         fprintf(stdout, "%07d\t", trigid);
          fprintf(stdout, "%llu\t", (long long unsigned int) TS);
          fprintf(stdout, "%d\t", within_ROC);
          fprintf(stdout, "%d\t", increment);
@@ -534,12 +536,16 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
                (long long int) (((long long int) TS - (long long int) lastStartTS) - (long long int) arguments->correlation_shift) % arguments->bxid_length);
          if (trigid < oldtrigid){
             if ( ( (trigid+65536) - oldtrigid) > 5) {
-               fprintf(stdout, "#Trig #sequence error from %d\n",oldtrigid);
+	      fprintf(stdout, "#Trig #sequence error:from %d to %d. BytePos=%ld(0x%lx)\n",oldtrigid,trigid,bytePos,bytePos);
             } else {
                fprintf(stdout, "#Trig\n");
             }
          } else {
-            fprintf(stdout, "#Trig\n");
+	   if ( ( (trigid - oldtrigid) > 10) ) {
+	     fprintf(stdout, "#Trig #sequence error:from %d to %d. BytePos=%ld(0x%lx)\n",oldtrigid,trigid,bytePos,bytePos);
+	   } else {
+	     fprintf(stdout, "#Trig\n");
+	   }
          }
          oldtrigid = trigid;
       }
@@ -553,10 +559,10 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    for (trigit = 0; trigit < bif_data_index; trigit++) {
 	   int updatedTrigID=update_counter_modulo(oldtrigid, bif_data[trigit].trig_count, 65536, 32768);
 	   if (oldtrigid >= updatedTrigID) {
-		   printf("#ERROR in trigger sequence. Old_trig = %d, new_trig = %d\n",oldtrigid,updatedTrigID);
+	     printf("#ERROR in trigger sequence. Run=%d,\tOld_trig=%d,\tnew_trig=%d,\tskip=%d\n",arguments->run_number,oldtrigid,updatedTrigID,(updatedTrigID - oldtrigid));
 	   }
 	   if ( (updatedTrigID - oldtrigid) >2 )
-		   printf("#ERROR skipped trigger. Old_trig = %d, new_trig = %d\tskip = %d\n",oldtrigid,updatedTrigID,(updatedTrigID - oldtrigid) );
+	     printf("#ERROR skipped trigger.     Run=%d,\tOld_trig=%d,\tnew_trig=%d,\tskip=%d\n",arguments->run_number, oldtrigid,updatedTrigID,(updatedTrigID - oldtrigid) );
 	   oldtrigid = updatedTrigID;
 	   bif_data[trigit].trig_count = updatedTrigID;
    }
@@ -1083,16 +1089,16 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
                   /* here we have correlated candidate in memory  */
                   /************************************************/
                   if (arguments->add_trigger_numbers) {
-                     printf("%d\t",arguments->run_number);
-                     printf("%d\t",bif_data[bif_iterator].trig_count);
+                     printf("%05d\t",arguments->run_number);
+                     printf("%07d\t",bif_data[bif_iterator].trig_count);
                   }
-                  printf("%d\t", ROcycle);
-                  printf("%d\t", bxid);
-                  printf("%d\t", asic);
-                  printf("%d\t", memcell);
-                  printf("%d\t", channel);
-                  printf("%d\t", tdc);
-                  printf("%d\t", adc);
+                  printf("%06d\t", ROcycle);
+                  printf("%05d\t", bxid);
+                  printf("%03d\t", asic);
+                  printf("%02d\t", memcell);
+                  printf("%02d\t", channel);
+                  printf("%04d\t", tdc);
+                  printf("%04d\t", adc);
                   printf("%d\t", adc_hit);
                   printf("%d\t", adc_gain);
                   printf("%llu\t", (long long unsigned int) bif_tdc); //				printf("%llu\t", bif_data[bif_iterator].tdc);
