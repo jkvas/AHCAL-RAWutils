@@ -1277,7 +1277,7 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("#wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
       int lda_port = (headinfo >> 8) & 0xFF;
@@ -1627,7 +1627,7 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("#wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
       int lda_port = (headinfo >> 8) & 0xFF;
@@ -1801,7 +1801,7 @@ int ahcal_bxid_spacing_scan(struct arguments_t * arguments, const BIF_record_t *
       freadret = fread(&headlen, sizeof(headlen), 1, fp);
       freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
       if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("#wrong header length: %d", headlen & 0xffff);
+         printf("#wrong header length: %d\n", headlen & 0xffff);
          continue;
       }
 
