@@ -16,7 +16,7 @@ static char args_doc[] = "";
 /* The options will be parsed. */
 static struct argp_option options[] =
 {
-   { "spiroc_raw_file", 'w', "SPIROC_RAW_FILE", 0, "!!!NOT IMPLEMENTED!!! raw file for the statistics data from AHCAL RAW file saved by EUDAQ. This file will be used instead of BIF data when used" },
+   { "spiroc_raw_file", 'w', "SPIROC_RAW_FILE", 0, "raw file for the statistics data from AHCAL RAW file saved by EUDAQ. This file will be used instead of BIF data when used" },
    { "bif_raw_file", 'b', "BIF_FILE", 0, "filename/path of the BIF raw data file" },
    { "trig_data_from_spiroc_raw", 'd', 0, 0, "read the timestamps from the AHCAL raw data" },
 //   { "output_file", 'o', "OUTPUT_FILE", 0, "!!!NOT IMPLEMENTED!!! filename to which the data should be written" },
@@ -35,6 +35,7 @@ static struct argp_option options[] =
    { "trig_num_offset", 260, "OFFSET", 0, "Trigger number adjustemnt" },
    { "ignored_gaps_ms", 'g', "MS", 0, "Do not include into statistics gaps longed than MS milisecond s. Default=5000 ms" },
    { "run_number", 'n', "RUN_NUMBER", 0, "Run number used for the prints" },   
+   { "print_timeline", 261, 0, 0, "print timeline of acquisition, busy and triggers from LDA packets" },
    { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -53,6 +54,7 @@ struct arguments_t {
    int roc_offset;
    int trig_num_offset;
    int ignored_gaps_ms;
+  int print_timeline;
 //   int print_bif_start_phases;
 };
 struct arguments_t arguments;
@@ -73,6 +75,7 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->roc_offset = 0;
    arguments->trig_num_offset = 0;
    arguments->ignored_gaps_ms = 5000;
+   arguments->print_timeline = 0;
 //   arguments->print_bif_start_phases = 0;
 }
 
@@ -91,6 +94,7 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#roc_offset=%d\n",arguments->roc_offset);
    printf("#trig_num_offset=%d\n",arguments->trig_num_offset);
    printf("#ignored_gaps_ms=%d\n",arguments->ignored_gaps_ms);
+   printf("#print_timeline=%d\n",arguments->print_timeline);
 }
 
 /* Parse a single option. */
@@ -141,6 +145,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       break;
    case 260:
       arguments->trig_num_offset = atoi(arg);
+      break;
+   case 261:
+      arguments->print_timeline = 1;
       break;
    case ARGP_KEY_END:
       if ((arguments->bif_filename == NULL) && (arguments->trig_data_from_spiroc_raw == 0)) {
@@ -253,6 +260,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    int lastTrigID = 0;   
 
    int within_ROC = 0;
+   int within_busy = 0;
    unsigned char minibuf[8];
    if (arguments->print_triggers) fprintf(stdout, "#ROC\tTrigid\tTS\tinROC\tROCincr\tTSfromStart\tfromLastTS\tphase\t#Trig\n");
    if (arguments->print_cycles) fprintf(stdout,"#RunNr\tROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\tphase\t#cycle\n");
@@ -299,7 +307,7 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
             ((u_int64_t) minibuf[1] << 8) +
             ((u_int64_t) minibuf[2] << 16) +
             ((u_int64_t) minibuf[3] << 24) +
-            ((u_int64_t) minibuf[4] << 32) +
+	    ((u_int64_t) minibuf[4] << 32) +
             ((u_int64_t) minibuf[5] << 40);
 
       if (type != 0x10) {
@@ -326,6 +334,8 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
             /*    fprintf(stdout,"%llu\t",TS); */
             /*    fprintf(stdout,"1\tNaN\t#cycle\n"); */
             /* } */
+	    if (arguments->print_timeline)
+	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline ACQ_START\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
          }
          if (type == 0x02) {//stop acq
             if (arguments->print_cycles) {
@@ -347,9 +357,29 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
 	    stats.OnTime += TS - lastStartTS;
 	    stats.RunFinish = TS;
             lastStopTS = TS;
+	    if (arguments->print_timeline)
+	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline ACQ_STOP\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
          }	 
-         if (type == 0x20) within_ROC = 2; //busy raised, but did not yet received stop acq
+         if (type == 0x21) {
+	    /* within_ROC = 2; //busy raised, but did not yet received stop acq */
+	    within_busy = 1;
+	    if (arguments->print_timeline)
+	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline busy raised\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
+         }
+         if (type == 0x20) {
+	    within_busy = 0;
+	    if (arguments->print_timeline)
+	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline busy down\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
+         }
          //         fseek(fp, 8, SEEK_CUR);
+	 if (type == 0x11) { //new ROC
+	    if (arguments->print_timeline)
+	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline new ROC\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
+         }
+	 if (type == 0x03) { //new ROC
+	    if (arguments->print_timeline)
+	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline SYNC packet\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
+         }
          continue;
       } //type != 0x10 (trigger)
 
@@ -363,6 +393,8 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          }
       }
       lastTrigID = trigid;
+      if (arguments->print_timeline)
+	printf("%llu\t%d\t%d\t%d\t%d\t#timeline trigger\n",(long long unsigned int) TS,ROC,within_ROC,within_busy,lastTrigID);
 
       int increment = (newROC - ROC) & 0xFF;
       if (increment > 50) {
