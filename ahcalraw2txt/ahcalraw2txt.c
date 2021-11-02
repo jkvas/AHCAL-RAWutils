@@ -49,7 +49,9 @@ static struct argp_option options[] =
             { "to_trigger_time", 266, "TDC_BIN", 0, "maximal external trigger time (mind the bxid length" },           
             { "run_number", 'u', "RUN_NUMBER", 0, "Run number used for the prints" },
             { "empty_bxid_only", 'y',0, 0, "uses only BXID, which doesn't have any hitbit. require_hitbit is not allowed" },
-            { "load_triggers", 272, 0, 0, "forces loading triggers into the memory" },            
+            { "load_triggers", 272, 0, 0, "forces loading triggers into the memory" },
+            { "pad_zeroes", 274, 0, 0, "forced padding of zeroes in the text output" },
+            { "klaus_offset_ns", 275, 0, 0, "a constant used to convert to AHCAL bxid" },
             { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -87,6 +89,8 @@ struct arguments_t {
    int from_cycle;
    int to_cycle;
    int load_triggers;
+   int pad_zeroes;
+   int klaus_offset_ns;
 };
 struct arguments_t arguments;
 
@@ -125,6 +129,8 @@ void arguments_init(struct arguments_t* arguments) {
    arguments->from_cycle = 0;
    arguments->to_cycle = 0x7FFFFFFF; /* max_int */
    arguments->load_triggers = 0;
+   arguments->pad_zeroes = 0;
+   arguments->klaus_offset_ns = 8750;
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -162,7 +168,8 @@ void arguments_print(struct arguments_t* arguments) {
    printf("#from_cycle=%d\n",arguments->from_cycle);
    printf("#to_cycle=%d\n",arguments->to_cycle);
    printf("#load_triggers=%d\n",arguments->load_triggers);
-   
+   printf("#pad_zeroes=%d\n",arguments->pad_zeroes);
+   printf("#klaus_offset_ns=%d\n",arguments->klaus_offset_ns);
    printf("# --- END PROGRAM PARAMETERS ---\n");
 }
 
@@ -222,8 +229,8 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
          arguments->to_memcell = atoi(arg);
          break;
       case 'n':
-	 arguments->binning = atoi(arg);
-	 break;
+         arguments->binning = atoi(arg);
+         break;
       case 'r':
          arguments->correlation_shift = atoi(arg);
          break;
@@ -272,9 +279,15 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       case 272:
          arguments->load_triggers = 1;
          break;
+      case 274:
+         arguments->pad_zeroes = 1;
+         break;
+      case 275:
+         arguments->klaus_offset_ns = atoi(arg);
+         break;
       case ARGP_KEY_END:
          if ((arguments->spiroc_raw_filename == NULL)) {
-            argp_error(state, "missing SPIROC data filename (This is essential)!\n");
+         argp_error(state, "missing SPIROC data filename (This is essential)!\n");
          }
          break;
       default:
@@ -670,6 +683,15 @@ int isTriggered(const struct arguments_t * arguments, u_int32_t ROcycle, int bxi
 int getPedestal(const int chip, const int channel, const int memcell, const int highgain) {
    return 0; //TODO
 }
+
+//convert gray encoded data into binary representation [LSB : MSB]
+inline unsigned short grayToBinary(unsigned short num) {
+   unsigned short mask;
+   for (mask = num >> 1; mask != 0; mask = mask >> 1)
+      num = num ^ mask;
+   return num;
+}
+
 int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
    int port_EORs[256];
    int i;
@@ -762,6 +784,116 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
       if (ROcycle < arguments->from_cycle) continue;
       if (ROcycle > (arguments->to_cycle+100)) break; /* for sure out of the range. let's stop */
       if (ROcycle > arguments->to_cycle) continue;    /* continue reading - some earlier roc can still appear */
+
+      if ((arguments->lda_port != -1 ) && (lda_port != arguments->lda_port) ) continue;
+      if ((arguments->lda_number != -1 ) && (lda_number != arguments->lda_number) ) continue;
+      /*KLAUS packets*/
+      if ((buf[0] == 0x41) && (buf[1] == 0x43) && (!((buf[2] == 0x48) && (buf[3] == 0x41))) && (buf[5] == 0x41)
+            && ((buf[4] == 0x49) || (buf[4] == 0x50) || (buf[4] == 0x51))) {
+//         printf("#Klaus packet! size=%03d\n", headlen & 0xFFFF);
+         asic = buf[8];
+         if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
+         ro_chain = buf[9];
+         dif_id = buf[12] + (buf[13] << 8);
+         if ((arguments->dif_id != -1) && (dif_id != arguments->dif_id)) continue; /* skip data from unwanted dif ID */
+//         printf("  Klaus chipid=%d, chain=%d, dif_id=%d, port=%d, headlen=%d\n", asic, ro_chain,dif_id, lda_port,headlen&0xFFFF);
+         ROCLength = get_ROCLength(arguments, bif_data, ROcycle);
+         int first_bif_iterator = get_first_iterator2(arguments, bif_data, ROcycle);
+         for (int hitindex = 0; 22 + 6 * hitindex < (headlen & 0xFFFF); hitindex++) {
+            unsigned char channelID = (buf[14 + 6 * hitindex + 1] >> 0) & 0x000f;
+            unsigned char groupID = (buf[14 + 6 * hitindex + 1] >> 4) & 0x0003;
+            int channel = 0xFF;
+            if (groupID == 3 && channelID == 0)
+               channel = 36; // T0 channel
+            else if (channelID < 12)
+               channel = 12 * groupID + (int) channelID;
+            adc_gain = (buf[14 + 6 * hitindex + 0] >> 7) & 0x0001;
+            //TODO gainsel busy
+            unsigned int ADC_10b = 1023 - (((buf[14 + 6 * hitindex + 0] << 4) & 0x03f0) | ((buf[14 + 6 * hitindex + 3] >> 4) & 0x000f));
+            unsigned int ADC_6b = 63 - ((buf[14 + 6 * hitindex + 0] >> 0) & 0x003f);
+            unsigned int ADC_PIPE = 255 - ((buf[14 + 6 * hitindex + 3] >> 0) & 0x00ff);
+            unsigned int adc = (ADC_6b << 8) + ADC_PIPE; //TODO does not work?
+            adc = ADC_10b;
+            unsigned int tdc = grayToBinary(((buf[14 + 6 * hitindex + 2] << 8) & 0xff00) | ((buf[14 + 6 * hitindex + 5] << 0) & 0x00ff));
+            bxid = (tdc * 25 * 4 - arguments->klaus_offset_ns) / (arguments->bxid_length * 25);
+            if ((bxid< arguments->from_bxid) || (bxid> arguments->to_bxid)) continue;
+            //common stuff
+            if ((arguments->require_gainbit == 1) && (adc_gain == 0)) continue; /* skip data withou gainbit */
+            if ((arguments->reject_gainbit == 1) && (adc_gain == 1)) continue; /* skip data with gainbit */
+            int matchingTriggerIterator = isTriggered(arguments, ROcycle, bxid, first_bif_iterator);
+            if ((matchingTriggerIterator >= 0) && arguments->triggered_reject) continue;
+            if ((matchingTriggerIterator < 0) && arguments->triggered_only) continue;
+            u_int64_t bif_tdc = 0;
+            if (matchingTriggerIterator >= 0) {
+               bif_iterator = matchingTriggerIterator;
+               //bif_roc = bif_data[bif_iterator].ro_cycle - arguments->start_position;
+               bif_bxid = ((int) bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
+               bif_tdc = (bif_data[bif_iterator].tdc - arguments->correlation_shift) % arguments->bxid_length;
+               if (bif_tdc < arguments->from_trigger_time) continue;
+               if (bif_tdc > arguments->to_trigger_time) continue;
+               matches++;
+            }
+
+            if (arguments->histogram) {
+               int adc_index = (adc & 0xfff) + (adc_gain ? 0 : 4096); //low gain shifted to >4096
+               if (adc_index > 8191) { //should not happen, but better be sure
+                  adc_index = (8191 / arguments->binning) * arguments->binning;
+               }
+               hist_adc[(adc_index / arguments->binning) * arguments->binning]++;
+               hist_ch_adc[channel][(adc_index / arguments->binning) * arguments->binning]++;
+               //shift odd bxid to >4096
+               hist_tdc[(((tdc & 0xfff) | ((bxid & 0x01) << 12)) / arguments->binning) * arguments->binning]++;
+               hist_ch_tdc[channel][(((tdc & 0xfff) | ((bxid & 0x01) << 12)) / arguments->binning) * arguments->binning]++;
+               entries++;
+               if (matchingTriggerIterator >= 0) matches++;
+               continue; //don't print details and go to next channel
+            }
+            entries++;
+            if (matchingTriggerIterator >= 0) {
+               /************************************************/
+               /* here we have correlated candidate in memory  */
+               /************************************************/
+               printf(arguments->pad_zeroes?"%05d\t":"%d\t", ROcycle);
+               printf(arguments->pad_zeroes?"%04d\t":"%d\t", bxid);
+               printf(arguments->pad_zeroes?"%03d\t":"%d\t", asic);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", 0);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", channel);
+               printf("%d\t", tdc);
+               printf("%d\t", adc);
+               printf("%d\t", 1);//TODO always 1?
+               printf("%d\t", adc_gain);
+               printf("%llu\t", (long long unsigned int) bif_tdc); //            printf("%llu\t", bif_data[bif_iterator].tdc);
+               printf("%d\t", ((int) bif_bxid) - ((int) bxid));
+               printf("%d\t", ROCLength);
+               printf("NaN\t");
+               printf("%d\t", lda_port);
+               printf("%d\t", dif_id);
+               printf("#KLauS\n");
+            } else {
+               printf(arguments->pad_zeroes?"%05d\t":"%d\t", ROcycle);
+               printf(arguments->pad_zeroes?"%04d\t":"%d\t", bxid);
+               printf(arguments->pad_zeroes?"%03d\t":"%d\t", asic);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", 0);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", channel);
+               printf("%d\t", tdc);
+               printf("%d\t", adc);
+               printf("%d\t", 1);
+               printf("%d\t", adc_gain);
+               printf("NaN\t");
+               printf("NaN\t");
+               printf("NaN\t");
+               printf("NaN\t");//, memcell_filled
+               printf("%d\t", lda_port);
+               printf("%d\t", dif_id);
+               printf("#KLauS\n");
+            }
+
+//            printf("    Klaus ASIC=%d, channel=adc_gain%d, ADC=%d, gain=%d, time=%d, bxid=%d\n", asic, channel, ADC_10b, (int) gainsel_evt, time, bxid_reconstructed);
+         }
+         continue;
+      }
+
+      //      SPIROC_packets
       if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
 //			printf("no spiroc data packet!\n");
          if (arguments->report_EOR>1) {
@@ -777,8 +909,6 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          }
          continue;
       }
-      if ((arguments->lda_port != -1 ) && (lda_port != arguments->lda_port) ) continue;
-      if ((arguments->lda_number != -1 ) && (lda_number != arguments->lda_number) ) continue;
 //      fprintf(stdout,"#ROC: %d\n",ROcycle);
       asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
       dif_id = buf[6] | (buf[7]<<8);//16-bit DIF ID
@@ -888,11 +1018,11 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
                /************************************************/
                /* here we have correlated candidate in memory  */
                /************************************************/
-               printf("%d\t", ROcycle);
-               printf("%d\t", bxid);
-               printf("%d\t", asic);
-               printf("%d\t", memcell);
-               printf("%d\t", channel);
+               printf(arguments->pad_zeroes?"%05d\t":"%d\t", ROcycle);
+               printf(arguments->pad_zeroes?"%04d\t":"%d\t", bxid);
+               printf(arguments->pad_zeroes?"%03d\t":"%d\t", asic);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", memcell);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", channel);
                printf("%d\t", tdc);
                printf("%d\t", adc);
                printf("%d\t", adc_hit);
@@ -908,11 +1038,11 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
                if (adc_gain != tdc_gain) printf("\t#mismatched_tdc_gain");
                printf("\n");
             } else {
-               printf("%d\t", ROcycle);
-               printf("%d\t", bxid);
-               printf("%d\t", asic);
-               printf("%d\t", memcell);
-               printf("%d\t", channel);
+               printf(arguments->pad_zeroes?"%05d\t":"%d\t", ROcycle);
+               printf(arguments->pad_zeroes?"%04d\t":"%d\t", bxid);
+               printf(arguments->pad_zeroes?"%03d\t":"%d\t", asic);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", memcell);
+               printf(arguments->pad_zeroes?"%02d\t":"%d\t", channel);
                printf("%d\t", tdc);
                printf("%d\t", adc);
                printf("%d\t", adc_hit);
