@@ -11,6 +11,9 @@
 #include <map>
 #include <vector>
 
+#include "KLauS_ROPackets.h"
+#include "KLauS_Data.h"
+
 using namespace std;
 
 const char* const short_opts = "w:vrluhmdt";
@@ -18,6 +21,7 @@ const struct option long_opts[] = {
       { "spiroc_raw_filename", required_argument, nullptr, 'w' },
       { "reject_validated", no_argument, nullptr, 'v' },
       { "correlation_shift", required_argument, nullptr, 'r' },
+      { "klaus_bxid0_offset", required_argument, nullptr, 'k' }, //in ns
       { "bxid_length", required_argument, nullptr, 'l' },
       { "run_number", required_argument, nullptr, 'u' },
       { "max_rocs", required_argument, nullptr, 'm' },
@@ -34,6 +38,7 @@ struct arguments_t {
       int adc_cut;
       bool reject_validated;
       int correlation_shift;
+      int klaus_bxid0_offset;
       int bxid_length;
       int run_number;
       int max_rocs;
@@ -55,6 +60,7 @@ void argumentsInit(struct arguments_t & arguments) {
    arguments.dummy_triggers = 0;
    arguments.debug = false;
    arguments.print_hit_multiplicity=false;
+   arguments.klaus_bxid0_offset = 8750;
 }
 
 void argumentsPrint(const struct arguments_t & arguments) {
@@ -62,6 +68,7 @@ void argumentsPrint(const struct arguments_t & arguments) {
    std::cout << "#adc_cut=" << arguments.adc_cut << std::endl;
    std::cout << "#reject_validated=" << arguments.reject_validated << std::endl;
    std::cout << "#correlation_shift=" << arguments.correlation_shift << std::endl;
+   std::cout << "#klaus_bxid0_offset=" << arguments.klaus_bxid0_offset << std::endl;
    std::cout << "#bxid_length=" << arguments.bxid_length << std::endl;
    std::cout << "#run_number=" << arguments.run_number << std::endl;
    std::cout << "#max_rocs=" << arguments.max_rocs << std::endl;
@@ -75,6 +82,7 @@ void PrintHelp() {
    std::cout << "Options: " << std::endl;
    std::cout << "   -w, --spiroc_raw_filename" << std::endl;
    std::cout << "   -r, --correlation_shift" << std::endl;
+   std::cout << "   -k, --klaus_bxid0_offset" << std::endl;
    std::cout << "   -l, --bxid_length" << std::endl;
    std::cout << "   -u, --run_number" << std::endl;
    std::cout << "   -v, --reject_validated" << std::endl;
@@ -102,6 +110,9 @@ void ProcessArgs(int argc, char** argv) {
             break;
          case 'r':
             arguments.correlation_shift = std::stoi(optarg);
+            break;
+         case 'k':
+            arguments.klaus_bxid0_offset= std::atoi(optarg);
             break;
          case 'u':
             arguments.run_number = std::stoi(optarg);
@@ -290,6 +301,13 @@ void prefetch_information(const struct arguments_t& arguments,
    std::cout << "#Trigger read finished. at ROC=" << ROcycle << std::endl;
 }
 
+inline unsigned short grayToBinary(unsigned short num) {
+   unsigned short mask;
+   for (mask = num >> 1; mask != 0; mask = mask >> 1)
+      num = num ^ mask;
+   return num;
+}
+
 int analyze_noise(const struct arguments_t & arguments) {
    unsigned char buf[4096];
    std::map<int, u_int64_t> startTSs; //maps start TS to ROC
@@ -349,7 +367,7 @@ int analyze_noise(const struct arguments_t & arguments) {
    int mismatches_hit = 0;
    int mismatches_gain = 0;
    int mismatches_length = 0;
-   u_int32_t ROCLength = 0;
+   uint64_t ROCLength = 0;
    /*BIF iteration variables*/
    // u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
    // u_int32_t bif_roc = 0;
@@ -365,12 +383,12 @@ int analyze_noise(const struct arguments_t & arguments) {
 //   printf("#1\t2\t3\t4\t5\t6\t7\t8\t9\t10\t11\t12\t13\t14\t15\n");
 //   printf("#ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tintra_bxid_event\tROCLen\tmem_filled\n");
 
-   int ROC = 0;
-   // int within_ROC = 0;
-   u_int64_t TS = 0;
-   u_int64_t lastTS = 0;
-   u_int64_t lastStartTS = 0;
-   u_int64_t lastStopTS = 0;
+//   int ROC = 0;
+//   // int within_ROC = 0;
+//   u_int64_t TS = 0;
+//   u_int64_t lastTS = 0;
+//   u_int64_t lastStartTS = 0;
+//   u_int64_t lastStopTS = 0;
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
@@ -422,111 +440,135 @@ int analyze_noise(const struct arguments_t & arguments) {
          printf("#unable to read the complete packet / EOF\n");
          break;
       }
-      if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
-         printf("no spiroc data packet! #head=0x%08x %08x\n", headinfo, headlen);
-         continue;
-      }
-//      fprintf(stdout,"#ROC: %d\n",ROcycle);
-      asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8);            //extract the chipID from the packet
-      if ((port == 9) && (asic > 0xFF)) { //DEBUG
-         printf("#ERROR in chipid. length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
-         // printf("#");
-         // for (int i=0; i<(headlen & 0xFFF); i++){
-         //    printf("%02x",buf[i]);
-         // }
-         // printf("\n");
-         continue;
-      }
-      if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
-         mismatches_length++;
-         printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d, port %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic,
-               port);
-         // printf("#");
-         // for (int i=0; i<(headlen & 0xFFF); i++){
-         //    printf("%02x",buf[i]);
-         // }
-         // printf("\n");
-         continue;
-      }
-      int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
-//    printf("#memory cells: %d\n", memcell_filled);
+      bool spirocPacket = false;
+      bool klausPacket = false;
+      if ((buf[0] == 0x41) && (buf[1] == 0x43) && (!((buf[2] == 0x48) && (buf[3] == 0x41))) && (buf[5] == 0x41)
+            && ((buf[4] == 0x49) || (buf[4] == 0x50) || (buf[4] == 0x51))) {
+         //printf("#Klaus packet! size=%03d\n", headlen & 0xFFFF);
+         asic = buf[8]+1;
+         int ro_chain = buf[9];
+         int dif_id = buf[12] + (buf[13] << 8);
+         for (unsigned int hitindex = 0; 22 + 6 * hitindex < (headlen & 0xFFFF); hitindex++) {
+            unsigned char channelID = (buf[14 + 6 * hitindex + 1] >> 0) & 0x000f;
+            unsigned char groupID = (buf[14 + 6 * hitindex + 1] >> 4) & 0x0003;
+            int channel = 0xFF;
+            if (groupID == 3 && channelID == 0)
+               channel = 36; // T0 channel
+            else if (channelID < 12)
+               channel = 12 * groupID + (int) channelID;
+            adc_gain = ((buf[14 + 6 * hitindex + 0] >> 7) & 0x0001); //compatible
+            adc_gain = 1 - adc_gain; //to be compatible with AHCAL
+            //TODO gainsel busy
+            unsigned int ADC_10b = 1023 - (((buf[14 + 6 * hitindex + 0] << 4) & 0x03f0) | ((buf[14 + 6 * hitindex + 3] >> 4) & 0x000f));
+            unsigned int ADC_6b = 63 - ((buf[14 + 6 * hitindex + 0] >> 0) & 0x003f);
+            unsigned int ADC_PIPE = 255 - ((buf[14 + 6 * hitindex + 3] >> 0) & 0x00ff);
+            unsigned int adc = (ADC_6b << 8) + ADC_PIPE; //TODO does not work?
+            adc = ADC_10b;
+            unsigned int tdc = grayToBinary(((buf[14 + 6 * hitindex + 2] << 8) & 0xff00) | ((buf[14 + 6 * hitindex + 5] << 0) & 0x00ff));
+            bxid = (tdc * 25 * 4 - arguments.klaus_bxid0_offset) / (arguments.bxid_length * 25);
 
-      if (startTSs.count(ROcycle) && stopTSs.count(ROcycle)) {
-         //OK, both timestamp exist
-//      if (startTSs[ROcycle] && stopTSs[ROcycle]) {
-//         std::cout << "timestamp for ROC " << ROcycle << "exists" << std::endl;
-      } else {
-//         std::cout << "timestamp for ROC " << ROcycle << " does not exist" << std::endl;
-         continue;
-      }
-      u_int64_t ROCLength = stopTSs[ROcycle] - startTSs[ROcycle] - arguments.correlation_shift;
-      acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += 0;
-      if (arguments.debug) {
-         //uint64_t ROCLength2 = (buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;
-         int last_bxid = buf[8 + 36 * 4 * memcell_filled] | (buf[8 + 36 * 4 * memcell_filled + 1] << 8);
-         std::cout << "#DEBUG length difference\t";
-         std::cout << ((int64_t) ROCLength - (int64_t) last_bxid * arguments.bxid_length);
-         std::cout << "\t" << ROCLength;
-         std::cout << "\t" << last_bxid * arguments.bxid_length;
-         std::cout << "\t" << last_bxid;
-         std::cout << "\t" << ROcycle;
-         std::cout << "\t" << asic;
-         std::cout << "\t" << (unsigned int) port;
-         std::cout << "\t" << memcell_filled;
-         std::cout << "\t" << memcells[ROcycle];
-         std::cout << "\t" << busyTSs[ROcycle] - startTSs[ROcycle] - arguments.correlation_shift;
-         std::cout << "\t" << (int64_t) stopTSs[ROcycle] - (int64_t) busyTSs[ROcycle];
-         std::cout << std::endl;
-         //TODO calculate the shortening and store
-         //TODO more asics in one layer should not shorten the cycle more!!!
-         //acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += ((double) 0.000000025) * ROCLength;
-      }
-      if (ROCLength > 4096 * arguments.bxid_length) {
-         std::cout << "#Readout cycle length=" << ROCLength << " too long. ROC=" << ROcycle
-               << " Startroc=" << startTSs[ROcycle] << " StopROC=" << stopTSs[ROcycle] << std::endl;
+
+            ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))]++;
+            //fill-in channel-wise information
+            hits[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
+            ADCsum[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))] += adc;
+            uint64_t MultiplicityIndex = (((uint64_t) ROcycle) << 32) | (uint64_t) bxid;
+            HitMultiplicity[MultiplicityIndex]++;
+            if (HitMultiplicity[MultiplicityIndex] == 0) HitMultiplicity[MultiplicityIndex]--; //prevent overflows
+            if (adc_gain && (adc > getMipCut(0.5, lda, port, asic, channel, 0))) {
+               hitsAfterAdcCut[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
+            }
+         }
+         acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += 0;
+         klausPacket = true;
       }
 
-      //fill the asic-wise information
-//      acquisitions[((lda << 16) | (port << 8) | (asic & 0xFF))]++;
-      ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))] += memcell_filled - arguments.dummy_triggers;         // - 1;
-
-      for (memcell = arguments.dummy_triggers; memcell < memcell_filled; ++memcell) {
-//         if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted asic*/
-         bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
-               | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
-         if (arguments.reject_validated && (ROCtriggers[ROcycle][bxid])) {
-//                  std::cout << "trigger match !!!!!!!!!!!!!!!!!!!!!!!!!!!! ROC=" << ROcycle << " BXID=" << bxid << std::endl;
-            ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))]--;
+      if ((buf[0] == 0x41) && (buf[1] == 0x43) && (buf[2] == 0x48) && (buf[3] == 0x41)) { //SPIROC
+         if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
+            mismatches_length++;
+            printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d, port %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle,
+                  asic,
+                  port);
             continue;
          }
-         for (channel = 0; channel < 36; ++channel) {
-//            if ((arguments->channel != -1) && (channel != arguments->channel)) continue;/*ship data from unwanted channel*/
-            tdc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1)]
-                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 1] << 8);
-            adc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2]
-                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2 + 1] << 8);
-            adc_hit = (adc & 0x1000) ? 1 : 0;
-            adc_gain = (adc & 0x2000) ? 1 : 0;
-            tdc_hit = (tdc & 0x1000) ? 1 : 0;
-            tdc_gain = (tdc & 0x2000) ? 1 : 0;
-            tdc = tdc & 0x0fff;
-            adc = adc & 0x0fff;
-            if (adc_hit != tdc_hit) mismatches_hit++;
-            if (adc_gain != tdc_gain) mismatches_gain++;
+         spirocPacket = true;
+         int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
+         asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8);            //extract the chipID from the packet
+         acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += 0;
+         ROCLength = (buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;
+         if (arguments.debug) {
+            int last_bxid = buf[8 + 36 * 4 * memcell_filled] | (buf[8 + 36 * 4 * memcell_filled + 1] << 8);
+            std::cout << "#DEBUG length difference\t";
+            std::cout << ((int64_t) ROCLength - (int64_t) last_bxid * arguments.bxid_length);
+            std::cout << "\t" << ROCLength;
+            std::cout << "\t" << last_bxid * arguments.bxid_length;
+            std::cout << "\t" << last_bxid;
+            std::cout << "\t" << ROcycle;
+            std::cout << "\t" << asic;
+            std::cout << "\t" << (unsigned int) port;
+            std::cout << "\t" << memcell_filled;
+            std::cout << "\t" << memcells[ROcycle];
+            std::cout << "\t" << busyTSs[ROcycle] - startTSs[ROcycle] - arguments.correlation_shift;
+            std::cout << "\t" << (int64_t) stopTSs[ROcycle] - (int64_t) busyTSs[ROcycle];
+            std::cout << std::endl;
+            //TODO calculate the shortening and store
+            //TODO more asics in one layer should not shorten the cycle more!!!
+            //acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += ((double) 0.000000025) * ROCLength;
+         }
+         ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))] += memcell_filled - arguments.dummy_triggers;         // - 1;
+         if (ROCLength > 4096 * arguments.bxid_length) {
+            std::cout << "#Readout cycle length=" << ROCLength << " too long. ROC=" << ROcycle
+                  << " Startroc=" << startTSs[ROcycle] << " StopROC=" << stopTSs[ROcycle] << std::endl;
+         }
+         for (memcell = arguments.dummy_triggers; memcell < memcell_filled; ++memcell) {
+            //         if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted asic*/
+            bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
+                  | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+            if (arguments.reject_validated && (ROCtriggers[ROcycle][bxid])) {
+               //                  std::cout << "trigger match !!!!!!!!!!!!!!!!!!!!!!!!!!!! ROC=" << ROcycle << " BXID=" << bxid << std::endl;
+               ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))]--;
+               continue;
+            }
+            for (channel = 0; channel < 36; ++channel) {
+               //            if ((arguments->channel != -1) && (channel != arguments->channel)) continue;/*ship data from unwanted channel*/
+               tdc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1)]
+                     | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 1] << 8);
+               adc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2]
+                     | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2 + 1] << 8);
+               adc_hit = (adc & 0x1000) ? 1 : 0;
+               adc_gain = (adc & 0x2000) ? 1 : 0;
+               tdc_hit = (tdc & 0x1000) ? 1 : 0;
+               tdc_gain = (tdc & 0x2000) ? 1 : 0;
+               tdc = tdc & 0x0fff;
+               adc = adc & 0x0fff;
+               if (adc_hit != tdc_hit) mismatches_hit++;
+               if (adc_gain != tdc_gain) mismatches_gain++;
 
-            //fill-in channel-wise information
-            if (adc_hit) {
-               hits[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
-               ADCsum[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))] += adc;
-               uint64_t MultiplicityIndex = (((uint64_t) ROcycle)<<32) | (uint64_t)bxid;
-			   HitMultiplicity[MultiplicityIndex]++;
-			   if (HitMultiplicity[MultiplicityIndex]==0) HitMultiplicity[MultiplicityIndex]--; //prevent overflows
-               if (adc_gain && (adc > getMipCut(0.5, lda, port, asic, channel, memcell))) {
-                  hitsAfterAdcCut[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
+               //fill-in channel-wise information
+               if (adc_hit) {
+                  hits[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
+                  ADCsum[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))] += adc;
+                  uint64_t MultiplicityIndex = (((uint64_t) ROcycle) << 32) | (uint64_t) bxid;
+                  HitMultiplicity[MultiplicityIndex]++;
+                  if (HitMultiplicity[MultiplicityIndex] == 0) HitMultiplicity[MultiplicityIndex]--; //prevent overflows
+                  if (adc_gain && (adc > getMipCut(0.5, lda, port, asic, channel, memcell))) {
+                     hitsAfterAdcCut[((lda << 24) | (port << 16) | ((asic & 0xFF) << 8) | (channel))]++;
+                  }
                }
             }
          }
       }
+
+      if ((klausPacket == false) && (spirocPacket == false)) {
+         if (arguments.debug) printf("#no spiroc data packet! #head=0x%08x %08x\n", headinfo, headlen);
+         continue;
+      }
+//      acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += 0;
+
+      //fill the asic-wise information
+//      acquisitions[((lda << 16) | (port << 8) | (asic & 0xFF))]++;
+
+
 
    }
    fclose(fp);

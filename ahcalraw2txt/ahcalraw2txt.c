@@ -807,7 +807,8 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
                channel = 36; // T0 channel
             else if (channelID < 12)
                channel = 12 * groupID + (int) channelID;
-            adc_gain = (buf[14 + 6 * hitindex + 0] >> 7) & 0x0001;
+            adc_gain = ((buf[14 + 6 * hitindex + 0] >> 7) & 0x0001); //compatible
+            adc_gain = 1-adc_gain; //to be compatible with AHCAL
             //TODO gainsel busy
             unsigned int ADC_10b = 1023 - (((buf[14 + 6 * hitindex + 0] << 4) & 0x03f0) | ((buf[14 + 6 * hitindex + 3] >> 4) & 0x000f));
             unsigned int ADC_6b = 63 - ((buf[14 + 6 * hitindex + 0] >> 0) & 0x003f);
