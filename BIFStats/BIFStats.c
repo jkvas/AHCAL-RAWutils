@@ -257,13 +257,16 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    u_int64_t TS, lastTS = 0;
    u_int64_t lastStartTS = 0;
    u_int64_t lastStopTS = 0;
+   u_int64_t lastBusyUp = 0;
+   u_int64_t lastBusyDown = 0;
+   
    int lastTrigID = 0;   
 
    int within_ROC = 0;
    int within_busy = 0;
    unsigned char minibuf[8];
    if (arguments->print_triggers) fprintf(stdout, "#ROC\tTrigid\tTS\tinROC\tROCincr\tTSfromStart\tfromLastTS\tphase\t#Trig\n");
-   if (arguments->print_cycles) fprintf(stdout,"#RunNr\tROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\tphase\t#cycle\n");
+   if (arguments->print_cycles) fprintf(stdout,"#RunNr\tROC\tstartTS\tstopTS\tlen_ROC\tlen_gap\tphase\tbusy->start\tbusy_len\t#cycle\n");
    
    while (1) {
       //int i = 0;
@@ -351,6 +354,8 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
 	       else
 		  fprintf(stdout,"NaN\t");
 	       fprintf(stdout, "%d\t",(int) rocphases[ROC]);
+	       fprintf(stdout, "%llu\t",(long long unsigned int)lastStartTS-lastBusyDown);
+	       fprintf(stdout, "%llu\t",(long long unsigned int)lastBusyDown-lastBusyUp);
                fprintf(stdout,"#cycle\n");
             }
             within_ROC = 0;
@@ -363,11 +368,13 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          if (type == 0x21) {
 	    /* within_ROC = 2; //busy raised, but did not yet received stop acq */
 	    within_busy = 1;
+	    lastBusyUp = TS;
 	    if (arguments->print_timeline)
 	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline busy raised\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
          }
          if (type == 0x20) {
 	    within_busy = 0;
+	    lastBusyDown = TS;
 	    if (arguments->print_timeline)
 	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline busy down\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
          }
