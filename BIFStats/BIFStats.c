@@ -259,6 +259,9 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
    u_int64_t lastStopTS = 0;
    u_int64_t lastBusyUp = 0;
    u_int64_t lastBusyDown = 0;
+   u_int64_t last2StopTS = 0;
+   u_int64_t last2BusyUp = 0;
+   u_int64_t last2BusyDown = 0;
    
    int lastTrigID = 0;   
 
@@ -355,12 +358,13 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
 		  fprintf(stdout,"NaN\t");
 	       fprintf(stdout, "%d\t",(int) rocphases[ROC]);
 	       fprintf(stdout, "%llu\t",(long long unsigned int)lastStartTS-lastBusyDown);
-	       fprintf(stdout, "%llu\t",(long long unsigned int)lastBusyDown-lastBusyUp);
+	       fprintf(stdout, "%llu\t",(long long unsigned int)lastBusyDown-last2BusyUp);
                fprintf(stdout,"#cycle\n");
             }
             within_ROC = 0;
 	    stats.OnTime += TS - lastStartTS;
 	    stats.RunFinish = TS;
+	    last2StopTS = lastStopTS;
             lastStopTS = TS;
 	    if (arguments->print_timeline)
 	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline ACQ_STOP\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
@@ -368,12 +372,14 @@ int load_timestamps_from_ahcal_raw(struct arguments_t * arguments, BIF_record_t 
          if (type == 0x21) {
 	    /* within_ROC = 2; //busy raised, but did not yet received stop acq */
 	    within_busy = 1;
+	    last2BusyUp = lastBusyUp;
 	    lastBusyUp = TS;
 	    if (arguments->print_timeline)
 	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline busy raised\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
          }
          if (type == 0x20) {
 	    within_busy = 0;
+	    last2BusyDown = lastBusyDown;
 	    lastBusyDown = TS;
 	    if (arguments->print_timeline)
 	       printf("%llu\t%d\t%d\t%d\tNaN\t#timeline busy down\n",(long long unsigned int) TS,ROC,within_ROC,within_busy);
