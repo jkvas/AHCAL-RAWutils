@@ -2,7 +2,7 @@ TARGET = AhcalNoiseAnalysis
 CXX=g++
 RM=rm -f
 CPPFLAGS=-std=c++11 -O2 -Wall
-LDFLAGS=-static
+#LDFLAGS=-static
 LDLIBS=
 
 SRCS=$(wildcard *.cpp)

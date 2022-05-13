@@ -11,8 +11,8 @@
 #include <map>
 #include <vector>
 
-#include "KLauS_ROPackets.h"
-#include "KLauS_Data.h"
+//#include "KLauS_ROPackets.h"
+//#include "KLauS_Data.h"
 
 using namespace std;
 
@@ -75,6 +75,9 @@ void argumentsPrint(const struct arguments_t & arguments) {
    std::cout << "#dummy_triggers=" << arguments.dummy_triggers << std::endl;
    std::cout << "#debug=" << arguments.debug << std::endl;
    std::cout << "#print_hit_multiplicity=" << arguments.print_hit_multiplicity << std::endl;
+   if (arguments.debug) {
+     std::cout <<"#length_to_last_bxid\tROCLength\tlast_bxid[25nstics]\tlast_bxid\tROcycle\tasic\tport\tfilled_mems\tRoc_Max_memcel\tbusy-start\tstop-busy\t#DEBUG length difference"<<std::endl;
+   }
 }
 
 void PrintHelp() {
@@ -495,7 +498,8 @@ int analyze_noise(const struct arguments_t & arguments) {
          int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
          asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8);            //extract the chipID from the packet
          acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += 0;
-         ROCLength = (buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;
+         ROCLength = stopTSs[ROcycle] - startTSs[ROcycle]  - arguments.correlation_shift;
+	 //=(buf[8 + 36 * 4 * 16] | (buf[8 + 36 * 4 * 16 + 1] << 8)) * arguments.bxid_length;//TODO this is wrong? Prefilled lengths should be should be 
          if (arguments.debug) {
             int last_bxid = buf[8 + 36 * 4 * memcell_filled] | (buf[8 + 36 * 4 * memcell_filled + 1] << 8);
             std::cout << "#DEBUG length difference\t";
@@ -516,9 +520,11 @@ int analyze_noise(const struct arguments_t & arguments) {
             //acqLens[((lda << 16) | (port << 8) | (asic & 0xFF))] += ((double) 0.000000025) * ROCLength;
          }
          ASIChits[((lda << 16) | (port << 8) | (asic & 0xFF))] += memcell_filled - arguments.dummy_triggers;         // - 1;
-         if (ROCLength > 4096 * arguments.bxid_length) {
+         if (ROCLength > (65536 * arguments.bxid_length + arguments.correlation_shift)) {
             std::cout << "#Readout cycle length=" << ROCLength << " too long. ROC=" << ROcycle
-                  << " Startroc=" << startTSs[ROcycle] << " StopROC=" << stopTSs[ROcycle] << std::endl;
+                  << " Startroc=" << startTSs[ROcycle] << " StopROC=" << stopTSs[ROcycle] << 
+	      " ROCLength=" << ROCLength <<
+	      " limit=" << (4096 * arguments.bxid_length + arguments.correlation_shift) << std::endl;
          }
          for (memcell = arguments.dummy_triggers; memcell < memcell_filled; ++memcell) {
             //         if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted asic*/
