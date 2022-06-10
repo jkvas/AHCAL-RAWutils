@@ -322,6 +322,21 @@ typedef struct {
 BIF_record_t *bif_data = 0;
 int bif_last_record = 0;
 
+u_int16_t grayRecode(const u_int16_t partiallyDecoded) {
+   //recodes a partially decoded gray number. the 16-bit number is partially decoded for bits 0-11.
+   u_int16_t Gray = partiallyDecoded;
+   u_int16_t highPart = 0; //bits 12-15 are not decoded
+   while (Gray & 0xF000) {
+      highPart ^= Gray;
+      Gray >>= 1;
+   }
+   if (highPart & 0x1000) {
+      return ((highPart & 0xF000) | ((~partiallyDecoded) & 0xFFF)); //invert the originally decoded data (the bits 0-11)
+   } else {
+      return ((highPart & 0xF000) | (partiallyDecoded & 0xFFF)); //combine the low and high part
+   }
+}
+
 void byteswap(unsigned char minibuf[]) {
    unsigned char byteswapped_minibuf[8];
    int i;
@@ -931,6 +946,7 @@ int convert_raw(const struct arguments_t * arguments, const BIF_record_t * bif_d
          if ((arguments->memcell != -1) && (memcell != arguments->memcell)) continue;/*skip data from unwanted memory cell*/
          bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
                | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+	 bxid=grayRecode(bxid);
          if ( (bxid < arguments->from_bxid) || (bxid > arguments->to_bxid) ) continue;
          if (bxid & 0x01) {
             bxids_odd++ ;
