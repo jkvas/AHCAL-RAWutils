@@ -1144,7 +1144,6 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
 //   int channel = 0;
 //   int tdc, adc, adc_hit, adc_gain = 0;
 //   u_int32_t ROCLength = 0;
-
    /*BIF iteration variables*/
 //   u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
 //   u_int32_t bif_roc = 0;
@@ -1157,7 +1156,6 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
    int freadret; //return code
    /* int roc_prev = -1; */
    u_int32_t ROcycle = -1;
-
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
@@ -1219,202 +1217,11 @@ int analyze_memcell_ocupancy(const struct arguments_t * arguments, const BIF_rec
    return 0;
 }
 
-int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
-   arguments->correlation_shift = 0;
-   int max_correlation = arguments->shift_scan;
-   int scan[max_correlation];
-   int i = 0;
-   for (; i < max_correlation; i++) {
-      scan[i] = 0;
-   }
-
-   FILE *fp;
-   if (!(fp = fopen(arguments->spiroc_raw_filename, "r"))) {
-      perror("Unable to open the spiroc raw file\n");
-      return -1;
-   }
-
-   /*spiroc datafile iteration*/
-   int bxid = 0;
-   int asic = 0;
-   int memcell = 0;
-   int channel = 0;
-   int tdc = 0;
-   int adc = 0;
-   int adc_hit = 0;
-//   int adc_gain = 0;
-
-   /*BIF iteration variables*/
-   u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
-   int bif_roc = 0;
-   int bif_bxid = 0;
-
-   int ext_search = 0;
-
-   unsigned int headlen, headinfo;
-   unsigned char b;
-   int freadret; //return code
-   /* int roc_prev = -1; */
-   u_int32_t ROcycle = -1;
-   printf("# bxid(BIF-DIF): -1 means, that DIF bxid is higher than it should be.\n");
-   printf("#1\t2\t3\t4\t5\t6\t7\t8\t9\t10\t11\t12\t13\t14\t15\n");
-   printf("#ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tintra_bxid_event\tROCLen\n");
-
-   while (1) {
-      freadret = fread(&b, sizeof(b), 1, fp);
-      if (!freadret) {
-         printf("#unable to read / EOF\n");
-         break;
-      }
-      if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
-
-      freadret = fread(&b, sizeof(b), 1, fp);
-      if (!freadret) {
-         perror("#unable to read / EOF\n");
-         break;
-      }
-      if (b != 0xCD) continue;/*try to look for second 0xCD. restart if not found*/
-      freadret = fread(&headlen, sizeof(headlen), 1, fp);
-      freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
-      if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
-         printf("#wrong header length: %d\n", headlen & 0xffff);
-         continue;
-      }
-      int lda_port = (headinfo >> 8) & 0xFF;
-      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
-         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
-         continue;
-      }
-      if (lda_port >= C_MAX_PORTS) {
-         printf("#ERROR: wrong LDA port: %d\n", lda_port);
-         continue;         //wrong port number
-      }
-      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
-      /* roc_prev = ROcycle; */
-      /* if (((headlen >> 16) & 0xFF) != roc_prev) { */
-      /*          roc_prev = ((headlen >> 16) & 0xFF); */
-      /*          ++ROcycle; */
-      /* //       cycles[row_index] = roc_prev; */
-      /*       } */
-      if (ROcycle >= C_ROC_READ_LIMIT) break;/*for debugging: if we do not want to read the while file. */
-//    printf("%05d\t", row_index);
-//    printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
-      freadret = fread(buf, headlen & 0xFFF, 1, fp);
-      if (!freadret) {
-         printf("#unable to read the complete packet / EOF\n");
-         break;
-      }
-      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
-      if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
-//       printf("no spiroc data packet!\n");
-         continue;
-      }
-      unsigned int dif_id=((unsigned int)buf[6]) | (((unsigned int)buf[7])<<8);
-      if ((arguments->module>=0) && (arguments->module != dif_id)) continue;
-      asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
-      if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
-      int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
-//    printf("#memory cells: %d\n", memcell_filled);
-      int first_bif_iterator = get_first_iterator2(arguments, bif_data, ROcycle);
-      for (memcell = arguments->minimum_memcell; memcell < memcell_filled; ++memcell) {
-	 if (memcell > arguments->maximum_memcell) continue;
-         bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
-               | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
-         bxid = grayRecode(bxid);
-         for (channel = 0; channel < 36; ++channel) {
-            if ((arguments->channel != -1) && (channel != arguments->channel)) continue; /*ship data from unwanted channel*/
-
-            tdc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1)]
-                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 1] << 8);
-            adc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2]
-                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2 + 1] << 8);
-            adc_hit = (adc & 0x1000) ? 1 : 0;
-//            adc_gain = (adc & 0x2000) ? 1 : 0;
-            tdc = tdc & 0x0fff;
-            adc = adc & 0x0fff;
-            /*here is the main correlation loop*/
-            if ((arguments->require_hitbit == 1) && (adc_hit == 0)) continue; /*skip data without hitbit, if required*/
-            if (bif_iterator >= C_MAX_BIF_EVENTS) break;
-
-//          if ((memcell == 0) && (channel == 0))
-//          printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", ROcycle, bxid, asic, memcell, channel, tdc, adc, hit, gain);
-            ext_search = (0 - arguments->extended_search);
-            if (ext_search + bxid < 0) { /*fix the beginning of the runs*/
-               ext_search = 0;
-            }
-            for (; ext_search < (1 + arguments->extended_search); ++ext_search) {
-//               int first_bif_iterator = 1; //get_first_iterator(arguments, bif_data, ROcycle, bxid - ext_search-3);
-
-               if (first_bif_iterator < 0) {
-                  continue;/*nothing found*/
-               }
-//                printf("notning found\n");
-               //             int bif_bxid = (bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
-               for (bif_iterator = first_bif_iterator; bif_iterator <= bif_last_record; ++bif_iterator) {
-                  bif_roc = (int) bif_data[bif_iterator].ro_cycle - arguments->start_position;
-                  if (bif_roc > ROcycle) break; /*we jumped to another readout cycle with the bif_iterator*/
-                  if (bif_roc < ROcycle) continue; /*not yet in the correct readout cycle*/
-                  bif_bxid = (bif_data[bif_iterator].tdc - 0) / arguments->bxid_length;
-                  if ((bif_bxid + ext_search) > (bxid + 1 + max_correlation / arguments->bxid_length)) break; /*we jumped to another bxid with the bif_iterator*/
-                  if ((bif_bxid + ext_search) < bxid) continue;
-                  /* int shift = 0; */
-                  int startindex = arguments->bxid_length * (bif_bxid + ext_search - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
-                  int endindex = startindex + arguments->bxid_length;
-                  if (startindex < 0) startindex = 0;
-                  if (endindex >= max_correlation) endindex = max_correlation;
-//                  printf("start: %d\tend: %d\n", startindex, endindex);
-		  if (startindex<max_correlation) scan[startindex]++;
-		  scan[endindex]--;
-                  /* for (shift = startindex; shift < endindex; shift++) { */
-                  /*    scan[shift]++; */
-                  /* } */
-//                  for (; shift < max_correlation; shift++) {
-//                     bif_bxid = ((int) bif_data[bif_iterator].tdc - shift) / arguments->bxid_length;
-////                     same_bif_bxid_index = (bif_bxid == previous_bif_bxid) ? same_bif_bxid_index + 1 : 0;
-////                     previous_bif_bxid = bif_bxid;
-//                     if (bif_bxid == bxid) {
-//                        scan[shift]++;
-//                     }
-//                  }
-               }
-            }
-
-         }
-      }
-
-//    printf("\n");
-   }
-   fclose(fp);
-   int running_sum=0;
-   for (i=0 ; i<max_correlation ; i++){//getting the number of correlations
-      running_sum += scan[i];
-      scan[i]=running_sum;
-   }
-   int maxval = -1;
-   int maxindex = -1;
-   for (i = 0; i < max_correlation; i++) {
-      if (scan[i] > maxval) {
-         maxindex = i;
-         maxval = scan[i];
-      }
-   }
-   printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
-   if (arguments->print_maxoffset){
-      printf("%d\t%d\t%d\t%d\t#ShortScanResult\n",arguments->run_number, arguments->shift_scan_method, maxindex, maxval);
-   } else {
-      printf("#correlation scan\n#shift\thits\tnormalized\n");
-      for (i = 0; i < max_correlation; i++) {
-	 printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
-      }
-   }
-   return 0;
-}
-
 int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
    fprintf(stdout, "#in scan_from_raw_bxidwise\n");
    arguments->correlation_shift = 0;
    int max_correlation = arguments->shift_scan;
-   int scan[max_correlation];
+   int scan[max_correlation+1];
    int i = 0;
    for (; i < max_correlation; i++) {
       scan[i] = 0;
@@ -1423,30 +1230,25 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
    for (i = 0; i < 65536; i++) {
       BXIDs[i] = 0;
    }
-
    FILE *fp;
    if (!(fp = fopen(arguments->spiroc_raw_filename, "r"))) {
       perror("Unable to open the spiroc raw file\n");
       return -1;
    }
    fseek(fp, 0, SEEK_SET); //skip timestamp packets
-
    /*spiroc datafile iteration*/
    int bxid = 0;
    int asic = 0;
    int memcell = 0;
-
    /*BIF iteration variables*/
    u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
    int bif_roc = 0;
    int bif_bxid = 0;
-
    unsigned int headlen, headinfo;
    unsigned char b;
    int freadret; //return code
    int roc_prev = 0; //-1;
    u_int32_t ROcycle = 0; //-1;
-
    while (1) {
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
@@ -1454,7 +1256,6 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          break;
       }
       if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
-
       freadret = fread(&b, sizeof(b), 1, fp);
       if (!freadret) {
          perror("#unable to read / EOF\n");
@@ -1522,7 +1323,6 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
                BXIDs[bxid] = 0;
             }
          }
-
          roc_prev = ROcycle;         //((headlen >> 16) & 0xFF);
          /* ++ROcycle; */
 //       cycles[row_index] = roc_prev;
@@ -1554,7 +1354,6 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
          bxid = grayRecode(bxid);
          BXIDs[bxid] = 1;
       }
-
 //    printf("\n");
    }
    printf("#Final ROC: %d:\n", ROcycle);
@@ -1588,7 +1387,7 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
 int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
    arguments->correlation_shift = 0;
    int max_correlation = arguments->shift_scan;
-   int scan[max_correlation];
+   int scan[max_correlation+1];
    int i = 0;
    for (; i < max_correlation; i++) {
       scan[i] = 0;
@@ -1686,12 +1485,190 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
             scan[endindex]--;
          }
       }
-
 //    printf("\n");
    }
    fclose(fp);   
    int running_sum=0;
     for (i=0 ; i<max_correlation ; i++){//getting the number of correlations
+      running_sum += scan[i];
+      scan[i]=running_sum;
+   }
+   int maxval = -1;
+   int maxindex = -1;
+   for (i = 0; i < max_correlation; i++) {
+      if (scan[i] > maxval) {
+         maxindex = i;
+         maxval = scan[i];
+      }
+   }
+   printf("#maximum correlation at: %d\thits:%d\n", maxindex, maxval);
+   if (arguments->print_maxoffset){
+      printf("%d\t%d\t%d\t%d\t#ShortScanResult\n",arguments->run_number, arguments->shift_scan_method, maxindex, maxval);
+   } else {
+      printf("#correlation scan\n#shift\thits\tnormalized\n");
+      for (i = 0; i < max_correlation; i++) {
+	 printf("%d\t%d\t%f\n", i, scan[i], (1.0 * scan[i]) / maxval);
+      }
+   }
+   return 0;
+}
+
+int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
+   arguments->correlation_shift = 0;
+   int max_correlation = arguments->shift_scan;
+   int scan[max_correlation+1];
+   int i = 0;
+   for (; i < max_correlation; i++) {
+      scan[i] = 0;
+   }
+   FILE *fp;
+   if (!(fp = fopen(arguments->spiroc_raw_filename, "r"))) {
+      perror("Unable to open the spiroc raw file\n");
+      return -1;
+   }
+   /*spiroc datafile iteration*/
+   int bxid = 0;
+   int asic = 0;
+   int memcell = 0;
+   int channel = 0;
+   int tdc = 0;
+   int adc = 0;
+   int adc_hit = 0;
+//   int adc_gain = 0;
+   /*BIF iteration variables*/
+   u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
+   int bif_roc = 0;
+   int bif_bxid = 0;
+   int ext_search = 0;
+   unsigned int headlen, headinfo;
+   unsigned char b;
+   int freadret; //return code
+   /* int roc_prev = -1; */
+   u_int32_t ROcycle = -1;
+   printf("# bxid(BIF-DIF): -1 means, that DIF bxid is higher than it should be.\n");
+   printf("#1\t2\t3\t4\t5\t6\t7\t8\t9\t10\t11\t12\t13\t14\t15\n");
+   printf("#ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tintra_bxid_event\tROCLen\n");
+   while (1) {
+      freadret = fread(&b, sizeof(b), 1, fp);
+      if (!freadret) {
+         printf("#unable to read / EOF\n");
+         break;
+      }
+      if (b != 0xCD) continue;/*try to look for first 0xCD. restart if not found*/
+      freadret = fread(&b, sizeof(b), 1, fp);
+      if (!freadret) {
+         perror("#unable to read / EOF\n");
+         break;
+      }
+      if (b != 0xCD) continue;/*try to look for second 0xCD. restart if not found*/
+      freadret = fread(&headlen, sizeof(headlen), 1, fp);
+      freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
+      if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
+         printf("#wrong header length: %d\n", headlen & 0xffff);
+         continue;
+      }
+      int lda_port = (headinfo >> 8) & 0xFF;
+      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
+         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+         continue;
+      }
+      if (lda_port >= C_MAX_PORTS) {
+         printf("#ERROR: wrong LDA port: %d\n", lda_port);
+         continue;         //wrong port number
+      }
+      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 100);
+      /* roc_prev = ROcycle; */
+      /* if (((headlen >> 16) & 0xFF) != roc_prev) { */
+      /*          roc_prev = ((headlen >> 16) & 0xFF); */
+      /*          ++ROcycle; */
+      /* //       cycles[row_index] = roc_prev; */
+      /*       } */
+      if (ROcycle >= C_ROC_READ_LIMIT) break;/*for debugging: if we do not want to read the while file. */
+//    printf("%05d\t", row_index);
+//    printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
+      freadret = fread(buf, headlen & 0xFFF, 1, fp);
+      if (!freadret) {
+         printf("#unable to read the complete packet / EOF\n");
+         break;
+      }
+      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
+      if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
+//       printf("no spiroc data packet!\n");
+         continue;
+      }
+      unsigned int dif_id=((unsigned int)buf[6]) | (((unsigned int)buf[7])<<8);
+      if ((arguments->module>=0) && (arguments->module != dif_id)) continue;
+      asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
+      if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
+      int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
+//    printf("#memory cells: %d\n", memcell_filled);
+      int first_bif_iterator = get_first_iterator2(arguments, bif_data, ROcycle);
+      for (memcell = arguments->minimum_memcell; memcell < memcell_filled; ++memcell) {
+	 if (memcell > arguments->maximum_memcell) continue;
+         bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
+               | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+         bxid = grayRecode(bxid);
+         for (channel = 0; channel < 36; ++channel) {
+            if ((arguments->channel != -1) && (channel != arguments->channel)) continue; /*ship data from unwanted channel*/
+            tdc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1)]
+                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 1] << 8);
+            adc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2]
+                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2 + 1] << 8);
+            adc_hit = (adc & 0x1000) ? 1 : 0;
+//            adc_gain = (adc & 0x2000) ? 1 : 0;
+            tdc = tdc & 0x0fff;
+            adc = adc & 0x0fff;
+            /*here is the main correlation loop*/
+            if ((arguments->require_hitbit == 1) && (adc_hit == 0)) continue; /*skip data without hitbit, if required*/
+            if (bif_iterator >= C_MAX_BIF_EVENTS) break;
+//          if ((memcell == 0) && (channel == 0))
+//          printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", ROcycle, bxid, asic, memcell, channel, tdc, adc, hit, gain);
+            ext_search = (0 - arguments->extended_search);
+            if (ext_search + bxid < 0) { /*fix the beginning of the runs*/
+               ext_search = 0;
+            }
+            for (; ext_search < (1 + arguments->extended_search); ++ext_search) {
+//               int first_bif_iterator = 1; //get_first_iterator(arguments, bif_data, ROcycle, bxid - ext_search-3);
+               if (first_bif_iterator < 0) {
+                  continue;/*nothing found*/
+               }
+//                printf("notning found\n");
+               //             int bif_bxid = (bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
+               for (bif_iterator = first_bif_iterator; bif_iterator <= bif_last_record; ++bif_iterator) {
+                  bif_roc = (int) bif_data[bif_iterator].ro_cycle - arguments->start_position;
+                  if (bif_roc > ROcycle) break; /*we jumped to another readout cycle with the bif_iterator*/
+                  if (bif_roc < ROcycle) continue; /*not yet in the correct readout cycle*/
+                  bif_bxid = (bif_data[bif_iterator].tdc - 0) / arguments->bxid_length;
+                  if ((bif_bxid + ext_search) > (bxid + 1 + max_correlation / arguments->bxid_length)) break; /*we jumped to another bxid with the bif_iterator*/
+                  if ((bif_bxid + ext_search) < bxid) continue;
+                  /* int shift = 0; */
+                  int startindex = arguments->bxid_length * (bif_bxid + ext_search - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
+                  int endindex = startindex + arguments->bxid_length;
+                  if (startindex < 0) startindex = 0;
+                  if (endindex >= max_correlation) endindex = max_correlation;
+//                  printf("start: %d\tend: %d\n", startindex, endindex);
+		  if (startindex<max_correlation) scan[startindex]++;
+		  scan[endindex]--;
+                  /* for (shift = startindex; shift < endindex; shift++) { */
+                  /*    scan[shift]++; */
+                  /* } */
+//                  for (; shift < max_correlation; shift++) {
+//                     bif_bxid = ((int) bif_data[bif_iterator].tdc - shift) / arguments->bxid_length;
+////                     same_bif_bxid_index = (bif_bxid == previous_bif_bxid) ? same_bif_bxid_index + 1 : 0;
+////                     previous_bif_bxid = bif_bxid;
+//                     if (bif_bxid == bxid) {
+//                        scan[shift]++;
+//                     }
+//                  }
+               }
+            }
+         }
+      }
+//    printf("\n");
+   }
+   fclose(fp);
+   int running_sum=0;
+   for (i=0 ; i<max_correlation ; i++){//getting the number of correlations
       running_sum += scan[i];
       scan[i]=running_sum;
    }
