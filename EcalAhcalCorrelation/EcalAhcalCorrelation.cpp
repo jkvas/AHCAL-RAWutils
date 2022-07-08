@@ -534,7 +534,7 @@ void makeCorrelations(const struct arguments_t &arguments) {
          }
       }
    }
-   std::cout << "#ROC\td-5\td-4\t-3\t-2\t-1\t0\t1\2\t\3\t4\t5\tmax";
+   std::cout << "#ROC\td-5\td-4\t-3\t-2\t-1\t0\t1\2\t\3\t4\t5\tmax"<<std::endl;
    for (auto roc : correlations) {
       std::cout << roc.first << "\t";
       int maxcorrcount=0;
