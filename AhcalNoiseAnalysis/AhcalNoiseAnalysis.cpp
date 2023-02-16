@@ -16,7 +16,7 @@
 
 using namespace std;
 
-const char* const short_opts = "w:vrluhmdt";
+const char* const short_opts = "w:vr:k:l:u:m:c:d:bht";
 const struct option long_opts[] = {
       { "spiroc_raw_filename", required_argument, nullptr, 'w' },
       { "reject_validated", no_argument, nullptr, 'v' },
