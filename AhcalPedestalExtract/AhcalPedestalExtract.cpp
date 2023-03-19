@@ -18,7 +18,7 @@
 
 using namespace std;
 
-const char *const short_opts = "w:vr:k:l:m:d:bhp:e:a:c:s:";
+const char *const short_opts = "w:vr:k:l:d:bhe:p:a:c:m:s:";
 const struct option long_opts[] = {
       { "spiroc_raw_filenames", required_argument, nullptr, 'w' },
       { "reject_validated", no_argument, nullptr, 'v' },
@@ -32,7 +32,7 @@ const struct option long_opts[] = {
       { "debug", no_argument, nullptr, 'b' },
       { "help", no_argument, nullptr, 'h' },
       //      { "print_hit_multiplicity", no_argument, nullptr, 't' },
-      { "max_hits_in_memcell", no_argument, nullptr, 'e' },
+      { "max_hits_in_memcell", required_argument, nullptr, 'e' },
       { "port", required_argument, nullptr, 'p' },
       { "asic", required_argument, nullptr, 'a' },
       { "channel", required_argument, nullptr, 'c' },
@@ -119,6 +119,12 @@ void PrintHelp () {
    std::cout << "   -c, --adc_cut" << std::endl;
    std::cout << "   -d, --dummy_triggers" << std::endl;
    std::cout << "   -h, --help" << std::endl;
+   std::cout << "   -e, --max_hits_in_memcell" << std::endl;
+   std::cout << "   -p, --port" << std::endl;
+   std::cout << "   -a, --asic" << std::endl;
+   std::cout << "   -c, --channel" << std::endl;
+   std::cout << "   -m, --memcell" << std::endl;
+   std::cout << "   -s, --skip_firstfill (1=reset on new run)" << std::endl;
 //   std::cout << "   -t, --print_hit_multiplicity" << std::endl;
    exit (1);
 }
