@@ -452,7 +452,7 @@ int analyze_pedestal(const struct arguments_t &arguments) {
       std::map<int, u_int64_t> busyTSs; //maps busy TS to ROC
       std::map<int, int> memcells; //maps maximum memcell filled in the ROC to ROC
       if (arguments.reset_on_start) {
-         std::cout << "INFO: reseting on start of the run" << std::endl;
+         std::cout << "#INFO: reseting on start of the run" << std::endl;
          FillingTS.clear();
       }
       prefetch_information(filename, arguments, ROCtriggers, startTSs, stopTSs, busyTSs, memcells);
