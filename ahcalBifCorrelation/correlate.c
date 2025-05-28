@@ -1309,15 +1309,17 @@ int scan_from_raw_bxidwise(struct arguments_t * arguments, const BIF_record_t * 
                      int startindex = arguments->bxid_length * (bif_bxid - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
                      int endindex = startindex + arguments->bxid_length;
                      if (startindex < 0) startindex = 0;
-                     if (endindex >= max_correlation) endindex = max_correlation;
+                     if (endindex >= max_correlation) endindex = max_correlation - 1;
 //                  printf("start: %d\tend: %d\n", startindex, endindex);
                      /* int shift = 0; */
                      /* for (shift = startindex; shift < endindex; shift++) { */
                      /*    scan[shift]++; */
                      /* } */
                      /* just marking where the scan data should increase by 1 and decrease by 1 again*/
-                     if (startindex<max_correlation) scan[startindex]++;
-                     scan[endindex]--;
+                     if ((startindex<max_correlation) && (endindex>0)){
+		        scan[startindex]++;
+		        scan[endindex]--;
+		     }
                   }
                }
                BXIDs[bxid] = 0;
@@ -1475,14 +1477,16 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
             int startindex = arguments->bxid_length * (bif_bxid - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
             int endindex = startindex + arguments->bxid_length;
             if (startindex < 0) startindex = 0;
-            if (endindex >= max_correlation) endindex = max_correlation;
+            if (endindex >= max_correlation) endindex = max_correlation - 1;
 //                  printf("start: %d\tend: %d\n", startindex, endindex);
             /* int shift = 0; */
             /* for (shift = startindex; shift < endindex; shift++) { */
             /*    scan[shift]++; */
             /* } */
-            if (startindex<max_correlation) scan[startindex]++;
-            scan[endindex]--;
+	    if ((startindex<max_correlation) && (endindex>0)){
+	      scan[startindex]++;
+	      scan[endindex]--;
+	    }            
          }
       }
 //    printf("\n");
@@ -1645,10 +1649,12 @@ int scan_from_raw_channelwise(struct arguments_t * arguments, const BIF_record_t
                   int startindex = arguments->bxid_length * (bif_bxid + ext_search - bxid - 1) + bif_data[bif_iterator].tdc % arguments->bxid_length + 1;
                   int endindex = startindex + arguments->bxid_length;
                   if (startindex < 0) startindex = 0;
-                  if (endindex >= max_correlation) endindex = max_correlation;
+                  if (endindex >= max_correlation) endindex = max_correlation - 1;
 //                  printf("start: %d\tend: %d\n", startindex, endindex);
-		  if (startindex<max_correlation) scan[startindex]++;
-		  scan[endindex]--;
+		  if ((startindex<max_correlation) && (endindex>0)){
+		     scan[startindex]++;
+		     scan[endindex]--;
+		  }
                   /* for (shift = startindex; shift < endindex; shift++) { */
                   /*    scan[shift]++; */
                   /* } */
