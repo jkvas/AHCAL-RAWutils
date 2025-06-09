@@ -1108,6 +1108,339 @@ int scan_from_raw_asicwise(struct arguments_t * arguments, const BIF_record_t * 
    return 0;
 }
 
+int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t * bif_data, const int bif_last_record) {
+   FILE *fp;
+   if (!(fp = fopen(arguments->ecal_raw_filename, "r"))) {
+      perror("Unable to open the spiroc raw file\n");
+      return -1;
+   }
+   /*spiroc datafile iteration*/
+   int bxid = 0;
+   int asic = 0;
+   int memcell = 0;
+   int channel = 0;
+   int tdc, adc, adc_hit, adc_gain = 0;
+   u_int32_t ROCLength = 0;
+
+   /*BIF iteration variables*/
+   u_int32_t bif_iterator = 0; //the bif iterator points to the first registered trigger
+   u_int32_t bif_roc = 0;
+   int bif_bxid = 0;
+   u_int64_t bif_tdc = 0;
+   u_int32_t matches = 0;
+
+   int ext_search = 0;
+
+   unsigned int headlen, headinfo;
+   unsigned char b;
+   int freadret; //return code
+   /* int roc_prev = -1; */
+   u_int32_t ROcycle = -1;
+//   if (arguments->debug_constant == 1) {
+//      printf("#Extra 15: memcells filled in the module\n");
+//      printf("#Extra 16: memcells filled in the whole detectors\n");
+//      printf("#Extra 17: last bxid in the asic\n");
+//      printf("#Extra 18: last bxid in the module\n");
+//      printf("#Extra 19: last bxid in the whole detector\n");
+//      printf("#Extra 20: length in BIF tics\n");
+//      printf("#Extra 21: bxid of previous memory cell\n");
+//      printf("#Extra 22: bxid of the next memory cell\n");
+//   }
+   printf("# bxid(BIF-DIF): -1 means, that DIF bxid is higher than it should be.\n");
+   printf("#1\t2\t3\t4\t5\t6\t7\t8\t9\t10\t11\t12\t13\t14\t15\t16\t17\t18\t19\t20\n");
+   printf("#");
+   //if (arguments->add_trigger_numbers) printf("RunNr\tTrigID\t");
+   printf("ROC\tbxid\tasic\tmcell\tchan\ttdc\tadc\thitb\tgainb\tBIF_TDC\tbxid(BIF-DIF)\tintra_bxid_event\tROCLen\tmem_filled\n");
+
+   while (1) {
+      freadret = fread(&b, sizeof(b), 1, fp);
+      if (!freadret) {
+         printf("#unable to read / EOF\n");
+         break;
+      }
+      if (b != 0xAB) {
+         printf("No 0xAB, but 0x%02x\n", b);
+         continue;/*try to look for first 0xCD. restart if not found*/
+      }
+      freadret = fread(&b, sizeof(b), 1, fp);
+      if (!freadret) {
+         perror("#unable to read / EOF\n");
+         break;
+      }
+      freadret = fread(&buf, 6, 1, fp);
+      if (!freadret) {
+         printf("#unable to read the complete packet / EOF\n");
+         break;
+      }
+      int datasize = 0;
+      datasize = ((unsigned int) buf[1] << 8) | buf[0];
+      freadret = fread(&buf, datasize + 2, 1, fp);
+      if (!freadret) {
+         printf("#unable to read the complete packet / EOF\n");
+         break;
+      }
+      unsigned short trailerWord = ((unsigned short) buf[datasize + 2 - 1] << 8) + buf[datasize + 2 - 2];
+      if (trailerWord == 0x9697) {
+         int ROC = cycleIDDecoding(buf);
+         ROcycle = update_counter_modulo(ROcycle, (ROC & 0xFFFF), 0x10000, 1000);
+         int first_bif_iterator = get_first_iterator2(arguments, bif_data, ROcycle);
+         if (ROcycle >= C_ROC_READ_LIMIT) break;/*for debugging: if we do not want to read the while file. */
+         int nbOfSingleSkirocEventsInFrame = (int) ((datasize - 2 - 2) / SINGLE_SKIROC_EVENT_SIZE);
+         int memcell_filled=nbOfSingleSkirocEventsInFrame-1;
+//         printf("BXIDS ROC%i: ",ROcycle);
+//         for (int n = 0; n < nbOfSingleSkirocEventsInFrame; n++) {
+//            int rawValue = (unsigned int) buf[datasize - 2 * (n + 1) - 2] + (((unsigned int) buf[datasize - 2 * (n + 1) - 1] & 0x0F) << 8);
+//            int bxid = Convert_FromGrayToBinary(rawValue, 12);
+//            int sca_ascii = nbOfSingleSkirocEventsInFrame - n - 1;
+//            int sca = nbOfSingleSkirocEventsInFrame - (sca_ascii + 1);
+//            printf(" %i",bxid);
+//         }
+//         printf("\n");
+         asic=buf[datasize-2]+(buf[1]<<4); //buf:0=layerID, 1=layerindex, n-2=chipid
+         for (int memcell = 0; memcell < nbOfSingleSkirocEventsInFrame; memcell++) {
+            int BxidRawValue = (unsigned int) buf[datasize - 2 * (memcell + 1) - 2] + (((unsigned int) buf[datasize - 2 * (memcell + 1) - 1] & 0x0F) << 8);
+            int bxid = Convert_FromGrayToBinary(BxidRawValue, 12);
+            for (int channel = 0; channel < 64; channel++) {
+               unsigned int tdc = buf[2 + (63 - channel) * 2 + 64 * 4 * (nbOfSingleSkirocEventsInFrame - memcell - 1)] |
+                     (buf[2 + (63 - channel) * 2 + 64 * 4 * (nbOfSingleSkirocEventsInFrame - memcell - 1) + 1] << 8);
+//buf[datasize - 2 * nbOfSingleSkirocEventsInFrame - 2 * ch - 4 - 128 * (nbOfSingleSkirocEventsInFrame - n - 1)]                     + (buf[datasize - 2 * nbOfSingleSkirocEventsInFrame - 2 * ch - 3 - 128 * (nbOfSingleSkirocEventsInFrame - n - 1)] << 8);
+               unsigned int adc = buf[2 + (63 - channel) * 2 + 64 * 4 * (nbOfSingleSkirocEventsInFrame - memcell - 1) + 64 * 2] |
+                     (buf[2 + (63 - channel) * 2 + 64 * 4 * (nbOfSingleSkirocEventsInFrame - memcell - 1) + 64 * 2 + 1] << 8);
+//               if (tdc & 0x3000) printf("#Hit TDC bxid=%i, ch=%i, mask=%04x\n", bxid, ch, tdc & 0x3000);
+//               if (adc & 0x3000) printf("#Hit ADC bxid=%i, ch=%i, mask=%04x\n", bxid, ch, adc & 0x3000);
+               adc_hit = (adc & 0x1000) ? 1 : 0;
+               adc_gain = (adc & 0x2000) ? 1 : 0;
+               tdc = Convert_FromGrayToBinary(tdc & 0x0fff,12);
+               adc = Convert_FromGrayToBinary(adc & 0x0fff,12);
+
+               /*here is the main correlation loop*/
+               if ((arguments->require_hitbit == 1) && (adc_hit == 0)) continue;/*skip data without hitbit, if required*/
+               if (bif_iterator >= C_MAX_BIF_EVENTS) break;
+               if (ROcycle >= C_ROC_READ_LIMIT) break;/*for debugging: if we do not want to read the while file. */
+               int bxid_prev = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell)] | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell) + 1] << 8);
+               int bxid_next = memcell == (memcell_filled - 1) ? -1 : buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 2)] | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 2) + 1] << 8);
+
+               //                              if ((memcell == 0) && (channel == 0))
+               //                              printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", ROcycle, bxid, asic, memcell, channel, tdc, adc, hit, gain);
+               int ext_search = 0;
+               for (; ext_search < 1; ++ext_search) {
+                  if (first_bif_iterator < 0) {
+                     continue;/*nothing found*/
+                  }
+                  //                                              printf("notning found\n");
+                  int same_bif_bxid_index = 0; /*counts the possible particles in the same bxid*/
+                  u_int64_t previous_bif_bxid = -1;
+                  //                                       int bif_bxid = (bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
+                  for (bif_iterator = first_bif_iterator; bif_iterator <= bif_last_record; ++bif_iterator) {
+                     bif_roc = bif_data[bif_iterator].ro_cycle - arguments->start_position;
+                     if (bif_roc > ROcycle) break; /*we jumped to another readout cycle with the bif_iterator*/
+                     if (bif_roc < ROcycle) continue; /*not yet in the correct readout cycle*/
+
+                     bif_bxid = ((int) bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
+                     if (bif_bxid + ext_search > bxid) break; /*we jumped to another bxid with the bif_iterator*/
+                     if (bif_bxid + ext_search < bxid) continue;/*not yet in the correct bxid*/
+                     same_bif_bxid_index = (bif_bxid == previous_bif_bxid) ? same_bif_bxid_index + 1 : 0;
+                     previous_bif_bxid = bif_bxid;
+
+                     bif_tdc = (bif_data[bif_iterator].tdc - arguments->correlation_shift) % arguments->bxid_length;
+                     matches++;
+                     /************************************************/
+                     /* here we have correlated candidate in memory  */
+                     /************************************************/
+//                     if (arguments->add_trigger_numbers) {
+//                        printf("%05d\t", arguments->run_number);
+//                        printf("%07d\t", bif_data[bif_iterator].trig_count);
+//                     }
+                     printf("%06d\t", ROcycle);
+                     printf("%05d\t", bxid);
+                     printf("%03d\t", asic);
+                     printf("%02d\t", memcell);
+                     printf("%02d\t", channel);
+                     printf("%04d\t", tdc);
+                     printf("%04d\t", adc);
+                     printf("%d\t", adc_hit);
+                     printf("%d\t", adc_gain);
+                     printf("%llu\t", (long long unsigned int) bif_tdc); //                                printf("%llu\t", bif_data[bif_iterator].tdc);
+                     printf("%d\t", ((int) bif_bxid) - ((int) bxid));
+                     printf("%d\t", same_bif_bxid_index);
+                     printf("%d\t", ROCLength);
+                     printf("%d\t", memcell_filled);
+                     printf("\n");
+                  }
+               }
+
+
+//               printf("ch%02i, bxid=%i,nb=%i: TDC=%i, ADC=%i\n", ch, bxid, nbOfSingleSkirocEventsInFrame, Convert_FromGrayToBinary(tdc, 12), Convert_FromGrayToBinary(adc, 12));
+            }
+//            printf("#--\n");
+         }
+
+//         printf("DEBUG rawframe");
+//         for (i = 0; i < (datasize>50000?50:datasize); i++)
+//            printf(" %02x", buf[i]);
+//         printf("\n");
+//         printf("\n");
+//
+
+      } else {
+         printf("Wrong Trailer word");
+      }
+//------------------------------------------------
+//      if (b != 0xCD) {
+//         printf("No 0xCD, but 0x%02x\n", b);
+//         continue;/*try to look for first 0xCD. restart if not found*/
+//      }
+//      freadret = fread(&headlen, sizeof(headlen), 1, fp);
+//      freadret = fread(&headinfo, sizeof(headinfo), 1, fp);
+//      if (((headlen & 0xFFFF) > 4095) || ((headlen & 0xFFFF) < 4)) {
+//         printf("#wrong header length: %d\n", headlen & 0xffff);
+//         continue;
+//      }
+//      if ((headlen & 0xFFFF) == 0x10) {
+//         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+//         //fprintf(stdout, "#TS packet\n");
+//         continue;
+//      }
+//      int lda_port = (headinfo >> 8) & 0xFF;
+//      if ((lda_port == 0xA0) || (lda_port == 0x80)) {
+//         fseek(fp, headlen & 0xFFFF, SEEK_CUR); //skip timestamp packets
+//         continue;
+//      }
+//      if (lda_port >= C_MAX_PORTS) {
+//         printf("#ERROR: wrong LDA port: %d\n", lda_port);
+//         continue;         //wrong port number
+//      }
+//      ROcycle = update_counter_modulo(ROcycle, ((headlen >> 16) & 0xFF), 0x100, 0x80);
+//      /* if (((headlen >> 16) & 0xFF) != roc_prev) { */
+//      /*    roc_prev = ((headlen >> 16) & 0xFF); */
+//      /*    ++ROcycle; */
+//      /* //                     cycles[row_index] = roc_prev; */
+//      /* } */
+////              printf("%05d\t", row_index);
+////              printf("%04X\t%04X\t%04X\t%04X", (headlen >> 16) & 0xFFFF, (headlen) & 0xFFFF, (headinfo >> 16) & 0xFFFF, (headinfo) & 0xFFFF);
+//      freadret = fread(buf, headlen & 0xFFF, 1, fp);
+//      if (!freadret) {
+//         printf("#unable to read the complete packet / EOF\n");
+//         break;
+//      }
+//      if ((buf[0] != 0x41) || (buf[1] != 0x43) || (buf[2] != 0x48) || (buf[3] != 0x41)) {
+////                      printf("no spiroc data packet!\n");
+//         continue;
+//      }
+//      unsigned int dif_id=((unsigned int)buf[6]) | (((unsigned int)buf[7])<<8);
+//      if ((arguments->module>=0) && (arguments->module != dif_id)) continue;
+//      if ((arguments->lda_port >= 0) && (lda_port != arguments->lda_port)) continue;
+////      fprintf(stdout,"#ROC: %d\n",ROcycle);
+//      asic = buf[(headlen & 0xFFF) - 1 - 3] | ((buf[(headlen & 0xFFF) - 1 - 2]) << 8); //extract the chipID from the packet
+//      if (((headlen & 0x0fff) - 12) % 146) { //if the length of the packet does not align with the number of memory cells
+//         printf("#ERROR wrong AHCAL packet length %d, modulo %d, ROC %d, ASIC %d\n", headlen & 0x0fff, ((headlen & 0x0fff) - 12) % 146, ROcycle, asic);
+//      }
+//      if ((arguments->asic != -1) && (asic != arguments->asic)) continue; /*skip data from unwanted asic*/
+//      int memcell_filled = ((headlen & 0xFFF) - 8 - 2 - 2) / (36 * 4 + 2);
+////              printf("#memory cells: %d\n", memcell_filled);
+//      ROCLength = get_ROCLength(arguments, bif_data, ROcycle);
+//      int first_bif_iterator = get_first_iterator2(arguments, bif_data, ROcycle);
+//      int max_asic_bxid = buf[8 + 36 * 4 * memcell_filled] | (buf[8 + 36 * 4 * memcell_filled + 1] << 8);
+//      for (memcell = arguments->minimum_memcell; memcell < memcell_filled; ++memcell) {
+//         if (memcell > arguments->maximum_memcell) continue;
+//         bxid = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1)]
+//               | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 1) + 1] << 8);
+//         bxid = grayRecode(bxid);
+//         if (bxid < arguments->minimum_bxid) continue;
+//         if (bxid > arguments->maximum_bxid) continue;
+//         for (channel = 0; channel < 36; ++channel) {
+//            if ((arguments->channel != -1) && (channel != arguments->channel)) continue;/*ship data from unwanted channel*/
+//
+//            tdc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1)]
+//                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 1] << 8);
+//            adc = buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2]
+//                  | (buf[8 + (35 - channel) * 2 + 36 * 4 * (memcell_filled - memcell - 1) + 36 * 2 + 1] << 8);
+//            adc_hit = (adc & 0x1000) ? 1 : 0;
+//            adc_gain = (adc & 0x2000) ? 1 : 0;
+//            tdc = tdc & 0x0fff;
+//            adc = adc & 0x0fff;
+//
+//
+//            /*here is the main correlation loop*/
+//            if ((arguments->require_hitbit == 1) && (adc_hit == 0)) continue;/*skip data without hitbit, if required*/
+//            if (bif_iterator >= C_MAX_BIF_EVENTS) break;
+//            if (ROcycle >= C_ROC_READ_LIMIT) /*for debugging: if we do not want to read the while file. */
+//               break;
+//            int bxid_prev = buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell )] | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell) + 1] << 8);
+//            int bxid_next = memcell==(memcell_filled-1)?-1: buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 2)] | (buf[8 + 36 * 4 * memcell_filled + 2 * (memcell_filled - memcell - 2) + 1] << 8);
+//
+////                              if ((memcell == 0) && (channel == 0))
+////                              printf("%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n", ROcycle, bxid, asic, memcell, channel, tdc, adc, hit, gain);
+//            ext_search = (0 - arguments->extended_search);
+//            if (ext_search + bxid < 0) /*fix the beginning of the runs*/
+//            ext_search = 0;
+//            for (; ext_search < (1 + arguments->extended_search); ++ext_search) {
+//               if (first_bif_iterator < 0) {
+//                  continue;/*nothing found*/
+//               }
+////                                              printf("notning found\n");
+//               int same_bif_bxid_index = 0; /*counts the possible particles in the same bxid*/
+//               u_int64_t previous_bif_bxid = -1;
+//               //                                       int bif_bxid = (bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
+//               for (bif_iterator = first_bif_iterator; bif_iterator <= bif_last_record; ++bif_iterator) {
+//                  bif_roc = bif_data[bif_iterator].ro_cycle - arguments->start_position;
+//                  if (bif_roc > ROcycle) break; /*we jumped to another readout cycle with the bif_iterator*/
+//                  if (bif_roc < ROcycle) continue; /*not yet in the correct readout cycle*/
+//
+//                  bif_bxid = ((int) bif_data[bif_iterator].tdc - arguments->correlation_shift) / arguments->bxid_length;
+//                  if (bif_bxid + ext_search > bxid) break; /*we jumped to another bxid with the bif_iterator*/
+//                  if (bif_bxid + ext_search < bxid) continue;/*not yet in the correct bxid*/
+//                  same_bif_bxid_index = (bif_bxid == previous_bif_bxid) ? same_bif_bxid_index + 1 : 0;
+//                  previous_bif_bxid = bif_bxid;
+//
+//                  bif_tdc = (bif_data[bif_iterator].tdc - arguments->correlation_shift) % arguments->bxid_length;
+//                  matches++;
+//                  /************************************************/
+//                  /* here we have correlated candidate in memory  */
+//                  /************************************************/
+//                  if (arguments->add_trigger_numbers) {
+//                     printf("%05d\t",arguments->run_number);
+//                     printf("%07d\t",bif_data[bif_iterator].trig_count);
+//                  }
+//                  printf("%06d\t", ROcycle);
+//                  printf("%05d\t", bxid);
+//                  printf("%03d\t", asic);
+//                  printf("%02d\t", memcell);
+//                  printf("%02d\t", channel);
+//                  printf("%04d\t", tdc);
+//                  printf("%04d\t", adc);
+//                  printf("%d\t", adc_hit);
+//                  printf("%d\t", adc_gain);
+//                  printf("%llu\t", (long long unsigned int) bif_tdc); //                                printf("%llu\t", bif_data[bif_iterator].tdc);
+//                  printf("%d\t", ((int) bif_bxid) - ((int) bxid));
+//                  printf("%d\t", same_bif_bxid_index);
+//                  printf("%d\t", ROCLength);
+//                  printf("%d\t", memcell_filled);
+//                  if (arguments->debug_constant == 1) {
+//                     printf("%d\t", extra_stats[ROcycle].cell_modules[lda_port]); //printf("#Extra 15: memcells filled in the module\n");
+//                     printf("%d\t", extra_stats[ROcycle].cell_detector);          //printf("#Extra 16: memcells filled in the whole detectors\n");
+//                     printf("%d\t", max_asic_bxid);                               //printf("#Extra 17: last bxid in the asic\n");
+//                     printf("%d\t", extra_stats[ROcycle].bxid_modules[lda_port]); //printf("#Extra 18: last bxid in the module\n");
+//                     printf("%d\t", extra_stats[ROcycle].bxid_detector);          //printf("#Extra 19: last bxid in the whole detector\n");
+//                     printf("%llu\t", (long long unsigned int) extra_stats[ROcycle].acq_length); //printf("#Extra 20: length in BIF tics\n");
+//                     printf("%d\t",bxid_prev);
+//                     printf("%d\t",bxid_next);
+//
+//                  }
+//                  printf("\n");
+//               }
+//            }
+//
+//         }
+//      }
+
+//              printf("\n");
+   }
+   fclose(fp);
+   return 0;
+}
+
+
 int main(int argc, char **argv) {
    /* Default values. */
    arguments_init(&arguments);
@@ -1139,7 +1472,14 @@ int main(int argc, char **argv) {
          default:
             break;
       }
+      goto final;
    }
+
+   if (arguments.ecal_raw_filename!= NULL) {
+      correlate_from_raw(&arguments, bif_data, bif_last_record);
+      goto final;
+   }
+   final:
    free(bif_data);
    free(extra_stats);
    exit(0);
