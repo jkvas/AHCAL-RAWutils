@@ -52,6 +52,7 @@ static struct argp_option options[] =
             /* { "print_maxoffset", 264, 0, 0, "prints the offset scan maxvalue instead of full scan" }, */
 	    /* { "add_trigger_numbers", 265, 0, 0, "adds run_number and trigger_number to the data" }, */
 	    //			{ "module_positions", 266, "NUMBER", 0, "calculates position within module. 1=1HBU, 2=2x2HBUs" },
+	    { "reverse_bxid", 267, 0,0,"reverse the order of the BXIDs in the memory cells. For debug purposes." },
             { 0 } };
 
 /* Used by main to communicate with parse_opt. */
@@ -91,6 +92,7 @@ struct arguments_t {
    /* int print_maxoffset; */
    /* int add_trigger_numbers; */
    /* int module_positions; */
+   int reverse_bxid;
 };
 struct arguments_t arguments;
 
@@ -131,6 +133,7 @@ void arguments_init(struct arguments_t* arguments) {
    /* arguments->print_maxoffset = 0; */
    /* arguments->add_trigger_numbers = 0; */
    /* arguments->module_positions = 0; */
+   arguments->reverse_bxid = 0;
 }
 
 void arguments_print(struct arguments_t* arguments) {
@@ -169,6 +172,7 @@ void arguments_print(struct arguments_t* arguments) {
    /* printf("#print_maxoffset=%d\n", arguments->print_maxoffset); */
    /* printf("#add_trigger_numbers=%d\n", arguments->add_trigger_numbers); */
    /* printf("#module_positions=%d\n", arguments->module_positions); */
+   printf("#reverse_bxid=%d\n", arguments->reverse_bxid);
 }
 
 /* Parse a single option. */
@@ -275,6 +279,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
       case 'w':
          arguments->ecal_raw_filename = arg;
          break;
+      case 267:
+	 arguments->reverse_bxid = 1;
+	 break;
       /* case 'x': */
       /*    arguments->extended_search = atoi(arg); */
       /*    break; */
@@ -1198,7 +1205,11 @@ int correlate_from_raw(const struct arguments_t * arguments, const BIF_record_t 
 //         printf("\n");
          asic=buf[datasize-2]+(buf[1]<<4); //buf:0=layerID, 1=layerindex, n-2=chipid
          for (int memcell = 0; memcell < nbOfSingleSkirocEventsInFrame; memcell++) {
-            int BxidRawValue = (unsigned int) buf[datasize - 2 * (memcell + 1) - 2] + (((unsigned int) buf[datasize - 2 * (memcell + 1) - 1] & 0x0F) << 8);
+	    int BxidRawValue = (unsigned int) buf[datasize - 2 * (memcell + 1) - 2] + (((unsigned int) buf[datasize - 2 * (memcell + 1) - 1] & 0x0F) << 8);
+	    if (arguments->reverse_bxid == 1){
+	       int new_memcell = nbOfSingleSkirocEventsInFrame - memcell - 1;
+	       BxidRawValue = (unsigned int) buf[datasize - 2 * (new_memcell + 1) - 2] + (((unsigned int) buf[datasize - 2 * (new_memcell + 1) - 1] & 0x0F) << 8);
+	    }
             int bxid = Convert_FromGrayToBinary(BxidRawValue, 12);
             for (int channel = 0; channel < 64; channel++) {
                unsigned int tdc = buf[2 + (63 - channel) * 2 + 64 * 4 * (nbOfSingleSkirocEventsInFrame - memcell - 1)] |
